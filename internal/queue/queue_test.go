@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -396,6 +397,58 @@ func TestSnapshotCompactsLog(t *testing.T) {
 		t.Fatalf("after snapshot + replay: %d jobs, want 25", n)
 	}
 	mustClaimID(t, q, 1) // lane order rebuilt from the snapshot
+}
+
+// Group commit's riskiest moment is compaction: the log is truncated while other
+// writers' flushes may be in flight. Snapshot constantly under concurrent load,
+// then check a replay rebuilds exactly the state that was acknowledged.
+func TestGroupCommitSurvivesConstantCompaction(t *testing.T) {
+	dir, c := t.TempDir(), newClock()
+	q, err := Open(Options{Dir: dir, Now: c.Now, SnapshotEvery: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const writers, each = 16, 150
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	done := map[int64]bool{}
+	for w := range writers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range each {
+				j, _, err := q.Enqueue(EnqueueRequest{Type: "x", Lane: string(rune('a' + w%4)), Key: fmt.Sprint(w, "-", i)})
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				if i%3 == 0 { // some jobs also run to completion
+					if l, _ := q.Claim("w", nil, time.Minute); l != nil {
+						if _, err := q.Complete(l.Job.ID, l.Token, nil); err == nil {
+							mu.Lock()
+							done[l.Job.ID] = true
+							mu.Unlock()
+						}
+					}
+				}
+				_ = j
+			}
+		}()
+	}
+	wg.Wait()
+	q.wal.close() // no final snapshot: replay must work from the last one plus the log
+
+	q = open(t, dir, c)
+	defer q.Close()
+	jobs, n := q.List(Filter{})
+	if n != writers*each {
+		t.Fatalf("%d jobs after replay, want %d", n, writers*each)
+	}
+	for _, j := range jobs {
+		if done[j.ID] && j.State != Succeeded {
+			t.Fatalf("job %d was acknowledged complete but replayed as %s", j.ID, j.State)
+		}
+	}
 }
 
 func TestConcurrentWorkersNeverShareAJob(t *testing.T) {

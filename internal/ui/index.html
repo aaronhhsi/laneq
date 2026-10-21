@@ -306,8 +306,13 @@ function render() {
   const app = $("#app");
   if (!state.loaded) { app.innerHTML = `<div class="empty">Loading…</div>`; return; }
   const open = viewer.open;
+  // "Posting now" is what's running or due within the hour; jobs queued further out
+  // (e.g. monthly token refreshes) are listed separately so they don't crowd it.
+  const soon = Date.now() + 3600e3;
   const running = state.active.filter(j => j.state === "running");
-  const waiting = state.active.filter(j => j.state === "queued");
+  const waiting = state.active.filter(j => j.state === "queued" && (new Date(j.run_at) <= soon || j.last_error));
+  const later = state.active.filter(j => j.state === "queued" && !waiting.includes(j))
+    .sort((a, b) => new Date(a.run_at) - new Date(b.run_at));
   app.innerHTML = `
     ${state.error ? `<div class="banner">${esc(state.error)}</div>` : ""}
     ${state.dead.length ? `<section class="panel">
@@ -324,9 +329,14 @@ function render() {
       </div>
     </section>` : ""}
     ${state.schedules.length ? state.schedules.map(lanePanel).join("") : `<section class="panel"><div class="empty">No schedules yet. Create one with PUT /v1/schedules/{lane}.</div></section>`}
+    ${later.length ? `<section class="panel">
+      <h2>Other scheduled jobs <span class="chip">${later.length}</span></h2>
+      <p class="muted" style="margin:-6px 0 0">Next: ${esc(later[0].type)} ${esc(later[0].payload && later[0].payload.member || "")}
+        on ${esc(fmtWhen(later[0].run_at))}${later.length > 1 ? `, then ${later.length - 1} more through ${esc(fmtNight(new Date(later[later.length - 1].run_at)))}` : ""}.</p>
+    </section>` : ""}
     <section class="panel">
       <h2>Recently posted</h2>
-      ${state.history.length ? `<div class="list">${state.history.map(j => item(j,
+      ${state.history.length ? `<div class="list">${state.history.filter(j => j.type !== "refresh_token").map(j => item(j,
           j.result && j.result.permalink ? `<a href="${esc(j.result.permalink)}" target="_blank" rel="noopener">Open ↗</a>` : `<span class="chip">${esc((j.result && j.result.mode) || "done")}</span>`,
           ` · ${esc(fmtWhen(j.finished_at))}`)).join("")}</div>` : `<div class="empty">Nothing yet.</div>`}
     </section>`;

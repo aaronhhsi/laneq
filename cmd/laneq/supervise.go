@@ -22,7 +22,11 @@ func supervise(ctx context.Context, cmd []string, out io.Writer) {
 		hideWindow(c)
 		started := time.Now()
 		log.Printf("worker: starting %q", cmd)
-		err := c.Run()
+		err := c.Start()
+		if err == nil {
+			killWithParent(c)
+			err = c.Wait()
+		}
 		if ctx.Err() != nil {
 			return
 		}

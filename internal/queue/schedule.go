@@ -93,7 +93,7 @@ func cloneSchedule(s Schedule) Schedule {
 
 // SetSchedule creates or replaces a lane's schedule. A new schedule's first run
 // is the next slot after now — creating one never releases anything immediately.
-func (q *Queue) SetSchedule(s Schedule) (ScheduleStatus, error) {
+func (q *Queue) SetSchedule(s Schedule) (_ ScheduleStatus, err error) {
 	if s.GapSeconds == 0 {
 		s.GapSeconds = 120
 	}
@@ -104,7 +104,7 @@ func (q *Queue) SetSchedule(s Schedule) (ScheduleStatus, error) {
 		return ScheduleStatus{}, err
 	}
 	q.mu.Lock()
-	defer q.mu.Unlock()
+	defer q.done(&err)
 	now := q.opts.Now()
 	if old, ok := q.schedules[s.Lane]; ok && s.At == old.At {
 		s.LastRun = old.LastRun // keep progress; changing the time restarts from now
@@ -120,12 +120,12 @@ func (q *Queue) SetSchedule(s Schedule) (ScheduleStatus, error) {
 
 // SetOverride sets how many jobs the run on a given day releases. A negative
 // count removes the override.
-func (q *Queue) SetOverride(lane string, day string, count int) (ScheduleStatus, error) {
+func (q *Queue) SetOverride(lane string, day string, count int) (_ ScheduleStatus, err error) {
 	if _, err := time.Parse(slotDate, day); err != nil {
 		return ScheduleStatus{}, fmt.Errorf("%w: day must be YYYY-MM-DD", ErrInvalid)
 	}
 	q.mu.Lock()
-	defer q.mu.Unlock()
+	defer q.done(&err)
 	cur, ok := q.schedules[lane]
 	if !ok {
 		return ScheduleStatus{}, fmt.Errorf("%w: lane %q has no schedule", ErrNotFound, lane)
@@ -148,7 +148,7 @@ func (q *Queue) SetOverride(lane string, day string, count int) (ScheduleStatus,
 // Schedules lists every schedule with its next run.
 func (q *Queue) Schedules() []ScheduleStatus {
 	q.mu.Lock()
-	defer q.mu.Unlock()
+	defer q.done(nil)
 	now := q.opts.Now()
 	var out []ScheduleStatus
 	for _, s := range q.schedules {
@@ -185,11 +185,10 @@ func (q *Queue) statusLocked(s Schedule, now time.Time) ScheduleStatus {
 
 // RunSchedules releases every batch that is due. Call it periodically; it is
 // cheap when nothing is due. It returns the jobs released.
-func (q *Queue) RunSchedules() ([]Job, error) {
+func (q *Queue) RunSchedules() (released []Job, err error) {
 	q.mu.Lock()
-	defer q.mu.Unlock()
+	defer q.done(&err)
 	now := q.opts.Now()
-	var released []Job
 	for _, cur := range q.schedules {
 		if !cur.Enabled {
 			continue

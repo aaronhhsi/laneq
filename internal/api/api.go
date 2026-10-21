@@ -75,7 +75,13 @@ func Handler(q *queue.Queue, opts Options) http.Handler {
 	mux.HandleFunc("POST /v1/jobs/{id}/complete", s.withID(s.complete))
 	mux.HandleFunc("POST /v1/jobs/{id}/fail", s.withID(s.fail))
 	mux.HandleFunc("POST /v1/claim", s.claim)
-	mux.HandleFunc("GET /v1/lanes", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, s.q.Lanes()) })
+	mux.HandleFunc("GET /v1/lanes", func(w http.ResponseWriter, r *http.Request) {
+		out := s.q.Lanes()
+		if out == nil {
+			out = []queue.LaneSummary{}
+		}
+		writeJSON(w, 200, out)
+	})
 	mux.HandleFunc("POST /v1/lanes/{lane}/release", s.release)
 	mux.HandleFunc("POST /v1/lanes/{lane}/pause", s.pause(true))
 	mux.HandleFunc("POST /v1/lanes/{lane}/resume", s.pause(false))

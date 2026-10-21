@@ -7,6 +7,7 @@
 package queue
 
 import (
+	"container/heap"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -83,6 +84,8 @@ type Queue struct {
 	byKey      map[string]int64
 	lanes      map[string]*lane
 	schedules  map[string]Schedule
+	running    map[int64]struct{} // leased jobs, so lease expiry doesn't scan every job
+	ready      readyHeap          // unordered queued jobs by (RunAt, Seq), so a claim doesn't either
 	nextID     int64
 	changed    chan struct{} // closed and replaced on every change, waking waiters
 }
@@ -102,6 +105,7 @@ func Open(opts Options) (*Queue, error) {
 		byKey:     map[string]int64{},
 		lanes:     map[string]*lane{},
 		schedules: map[string]Schedule{},
+		running:   map[int64]struct{}{},
 		nextID:    1,
 		changed:   make(chan struct{}),
 	}
@@ -181,9 +185,92 @@ func (q *Queue) applyJob(j *Job) {
 		i := sort.Search(len(l.active), func(i int) bool { return q.jobs[l.active[i]].Seq > j.Seq })
 		l.active = slices.Insert(l.active, i, j.ID)
 	}
+
+	if j.State == Running {
+		q.running[j.ID] = struct{}{}
+	} else {
+		delete(q.running, j.ID)
+	}
+	if j.Lane == "" && j.State == Queued &&
+		(old == nil || old.State != Queued || !old.RunAt.Equal(j.RunAt) || old.Seq != j.Seq) {
+		heap.Push(&q.ready, readyEntry{id: j.ID, runAt: j.RunAt, seq: j.Seq})
+	}
 }
 
-// commit makes changes durable, then applies them and wakes waiters.
+// readyHeap orders unordered queued jobs by (RunAt, Seq). Entries go stale when
+// a job is claimed, canceled or rescheduled; they're dropped when they surface.
+type readyEntry struct {
+	id    int64
+	runAt time.Time
+	seq   int64
+}
+
+type readyHeap []readyEntry
+
+func (h readyHeap) Len() int { return len(h) }
+func (h readyHeap) Less(i, k int) bool {
+	if !h[i].runAt.Equal(h[k].runAt) {
+		return h[i].runAt.Before(h[k].runAt)
+	}
+	return h[i].seq < h[k].seq
+}
+func (h readyHeap) Swap(i, k int) { h[i], h[k] = h[k], h[i] }
+func (h *readyHeap) Push(x any)   { *h = append(*h, x.(readyEntry)) }
+func (h *readyHeap) Pop() any {
+	old := *h
+	e := old[len(old)-1]
+	*h = old[:len(old)-1]
+	return e
+}
+
+func (q *Queue) fresh(e readyEntry) bool {
+	j := q.jobs[e.id]
+	return j != nil && j.Lane == "" && j.State == Queued && j.RunAt.Equal(e.runAt) && j.Seq == e.seq
+}
+
+// nextUnordered is the earliest runnable unordered job of the given types, or
+// nil, plus when the earliest one not yet due becomes due.
+func (q *Queue) nextUnordered(types []string, now time.Time) (*Job, time.Time) {
+	var skipped []readyEntry
+	defer func() {
+		for _, e := range skipped {
+			heap.Push(&q.ready, e)
+		}
+	}()
+	for q.ready.Len() > 0 {
+		e := q.ready[0]
+		if !q.fresh(e) {
+			heap.Pop(&q.ready)
+			continue
+		}
+		if e.runAt.After(now) {
+			return nil, e.runAt
+		}
+		j := q.jobs[e.id]
+		if len(types) == 0 || slices.Contains(types, j.Type) {
+			return j, time.Time{}
+		}
+		skipped = append(skipped, heap.Pop(&q.ready).(readyEntry)) // another worker's type
+	}
+	return nil, time.Time{}
+}
+
+// done ends an operation: it releases the lock, then waits until everything
+// written so far — this operation's changes and anything it read — is durable.
+// Operations running at the same time share one fsync (group commit), and a
+// result is never returned before the changes behind it are on disk.
+//
+// Use it as `q.mu.Lock(); defer q.done(&err)`.
+func (q *Queue) done(errp *error) {
+	off := q.wal.written.Load()
+	q.mu.Unlock()
+	if err := q.wal.syncTo(off); err != nil && errp != nil && *errp == nil {
+		*errp = fmt.Errorf("write-ahead log: %w", err)
+	}
+}
+
+// commit writes changes to the log, then applies them and wakes waiters. The
+// caller's done() makes them durable before anyone is told they happened.
 func (q *Queue) commit(recs ...record) error {
 	if err := q.wal.append(recs...); err != nil {
 		return fmt.Errorf("write-ahead log: %w", err)
@@ -195,8 +282,8 @@ func (q *Queue) commit(recs ...record) error {
 	close(q.changed)
 	q.changed = make(chan struct{})
 	if q.walRecords >= q.opts.SnapshotEvery {
-		// The change is already durable in the log; a failed compaction just means
-		// a longer replay next time, so it isn't reported to the caller.
+		// The change is already in the log; a failed compaction just means a
+		// longer replay next time, so it isn't reported to the caller.
 		_ = q.snapshotLocked()
 	}
 	return nil
@@ -259,7 +346,7 @@ func (q *Queue) Enqueue(req EnqueueRequest) (job Job, created bool, err error) {
 		return Job{}, false, fmt.Errorf("%w: max_attempts must be positive", ErrInvalid)
 	}
 	q.mu.Lock()
-	defer q.mu.Unlock()
+	defer q.done(&err)
 	if req.Key != "" {
 		if id, ok := q.byKey[req.Key]; ok {
 			return *q.jobs[id], false, nil
@@ -294,13 +381,12 @@ func (q *Queue) Enqueue(req EnqueueRequest) (job Job, created bool, err error) {
 }
 
 // Release queues the first n held jobs of a lane (in lane order) to run at runAt.
-func (q *Queue) Release(laneName string, n int, runAt time.Time) ([]Job, error) {
+func (q *Queue) Release(laneName string, n int, runAt time.Time) (out []Job, err error) {
 	q.mu.Lock()
-	defer q.mu.Unlock()
+	defer q.done(&err)
 	if runAt.IsZero() {
 		runAt = q.opts.Now()
 	}
-	var out []Job
 	l := q.lanes[laneName]
 	if l == nil {
 		return nil, nil
@@ -332,10 +418,10 @@ type Lease struct {
 
 // Claim leases the next runnable job of one of the given types (any type if
 // empty), or returns nil if none is runnable now.
-func (q *Queue) Claim(worker string, types []string, lease time.Duration) (*Lease, error) {
+func (q *Queue) Claim(worker string, types []string, lease time.Duration) (l *Lease, err error) {
 	q.mu.Lock()
-	defer q.mu.Unlock()
-	l, _, _, err := q.claimLocked(worker, types, lease)
+	defer q.done(&err)
+	l, _, _, err = q.claimLocked(worker, types, lease)
 	return l, err
 }
 
@@ -343,9 +429,7 @@ func (q *Queue) Claim(worker string, types []string, lease time.Duration) (*Leas
 func (q *Queue) ClaimWait(ctx context.Context, worker string, types []string, lease, wait time.Duration) (*Lease, error) {
 	deadline := q.opts.Now().Add(wait)
 	for {
-		q.mu.Lock()
-		l, changed, wake, err := q.claimLocked(worker, types, lease)
-		q.mu.Unlock()
+		l, changed, wake, err := q.claimOnce(worker, types, lease)
 		if l != nil || err != nil {
 			return l, err
 		}
@@ -369,6 +453,12 @@ func (q *Queue) ClaimWait(ctx context.Context, worker string, types []string, le
 	}
 }
 
+func (q *Queue) claimOnce(worker string, types []string, lease time.Duration) (l *Lease, changed chan struct{}, wake time.Time, err error) {
+	q.mu.Lock()
+	defer q.done(&err)
+	return q.claimLocked(worker, types, lease)
+}
+
 // claimLocked also returns the change channel to wait on and the next time
 // something could become runnable (a RunAt or a lease expiry), for ClaimWait.
 func (q *Queue) claimLocked(worker string, types []string, lease time.Duration) (*Lease, chan struct{}, time.Time, error) {
@@ -383,8 +473,6 @@ func (q *Queue) claimLocked(worker string, types []string, lease time.Duration) 
 	var wake time.Time
 	consider := func(j *Job) {
 		switch j.State {
-		case Running:
-			wake = earliest(wake, j.LeaseExpires)
 		case Queued:
 			if len(types) > 0 && !slices.Contains(types, j.Type) {
 				return
@@ -399,16 +487,22 @@ func (q *Queue) claimLocked(worker string, types []string, lease time.Duration) 
 		}
 	}
 	for name, l := range q.lanes {
-		if len(l.active) == 0 || l.state.Paused {
+		if name == "" || len(l.active) == 0 || l.state.Paused {
 			continue
 		}
-		if name == "" { // unordered: every job is eligible
-			for _, id := range l.active {
-				consider(q.jobs[id])
-			}
-		} else { // ordered: only the head may run
-			consider(q.jobs[l.active[0]])
+		consider(q.jobs[l.active[0]]) // ordered: only the head may run
+	}
+	if l := q.lanes[""]; l != nil && !l.state.Paused { // unordered: the earliest ready job
+		j, due := q.nextUnordered(types, now)
+		if j != nil {
+			consider(j)
 		}
+		if !due.IsZero() {
+			wake = earliest(wake, due)
+		}
+	}
+	for id := range q.running { // a lease expiring can unblock a lane
+		wake = earliest(wake, q.jobs[id].LeaseExpires)
 	}
 	if best == nil {
 		return nil, q.changed, wake, nil
@@ -451,9 +545,9 @@ func (q *Queue) leased(id int64, token string) (Job, error) {
 }
 
 // Heartbeat extends a lease and optionally saves a checkpoint.
-func (q *Queue) Heartbeat(id int64, token string, checkpoint json.RawMessage, lease time.Duration) (Job, error) {
+func (q *Queue) Heartbeat(id int64, token string, checkpoint json.RawMessage, lease time.Duration) (_ Job, err error) {
 	q.mu.Lock()
-	defer q.mu.Unlock()
+	defer q.done(&err)
 	now := q.opts.Now()
 	if err := q.expireLocked(now); err != nil {
 		return Job{}, err
@@ -476,9 +570,9 @@ func (q *Queue) Heartbeat(id int64, token string, checkpoint json.RawMessage, le
 }
 
 // Complete marks a leased job succeeded.
-func (q *Queue) Complete(id int64, token string, result json.RawMessage) (Job, error) {
+func (q *Queue) Complete(id int64, token string, result json.RawMessage) (_ Job, err error) {
 	q.mu.Lock()
-	defer q.mu.Unlock()
+	defer q.done(&err)
 	if err := q.expireLocked(q.opts.Now()); err != nil {
 		return Job{}, err
 	}
@@ -505,9 +599,9 @@ type FailRequest struct {
 }
 
 // Fail records a failed attempt: the job is retried after backoff, or goes dead.
-func (q *Queue) Fail(id int64, token string, req FailRequest) (Job, error) {
+func (q *Queue) Fail(id int64, token string, req FailRequest) (_ Job, err error) {
 	q.mu.Lock()
-	defer q.mu.Unlock()
+	defer q.done(&err)
 	now := q.opts.Now()
 	if err := q.expireLocked(now); err != nil {
 		return Job{}, err
@@ -555,22 +649,25 @@ func clearLease(j *Job) {
 // ExpireLeases fails every running job whose lease has run out. It runs on
 // every queue operation anyway; call it periodically so expiries are recorded
 // even when nothing else is happening.
-func (q *Queue) ExpireLeases() error {
+func (q *Queue) ExpireLeases() (err error) {
 	q.mu.Lock()
-	defer q.mu.Unlock()
+	defer q.done(&err)
 	return q.expireLocked(q.opts.Now())
 }
 
 func (q *Queue) expireLocked(now time.Time) error {
-	for _, l := range q.lanes {
-		for _, id := range slices.Clone(l.active) {
-			j := *q.jobs[id]
-			if j.State == Running && !j.LeaseExpires.After(now) {
-				msg := fmt.Sprintf("lease expired (worker %q stopped responding)", j.Worker)
-				if err := q.failLocked(j, FailRequest{Error: msg}, now); err != nil {
-					return err
-				}
-			}
+	var expired []int64
+	for id := range q.running {
+		if !q.jobs[id].LeaseExpires.After(now) {
+			expired = append(expired, id)
+		}
+	}
+	slices.Sort(expired) // deterministic log order
+	for _, id := range expired {
+		j := *q.jobs[id]
+		msg := fmt.Sprintf("lease expired (worker %q stopped responding)", j.Worker)
+		if err := q.failLocked(j, FailRequest{Error: msg}, now); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -580,9 +677,9 @@ func (q *Queue) expireLocked(now time.Time) error {
 
 // Retry runs a dead job again with fresh attempts, or runs a job waiting on
 // backoff right away.
-func (q *Queue) Retry(id int64) (Job, error) {
+func (q *Queue) Retry(id int64) (_ Job, err error) {
 	q.mu.Lock()
-	defer q.mu.Unlock()
+	defer q.done(&err)
 	j, err := q.get(id)
 	if err != nil {
 		return Job{}, err
@@ -602,9 +699,9 @@ func (q *Queue) Retry(id int64) (Job, error) {
 }
 
 // Cancel removes a job that isn't running or finished, unblocking its lane.
-func (q *Queue) Cancel(id int64) (Job, error) {
+func (q *Queue) Cancel(id int64) (_ Job, err error) {
 	q.mu.Lock()
-	defer q.mu.Unlock()
+	defer q.done(&err)
 	j, err := q.get(id)
 	if err != nil {
 		return Job{}, err
@@ -622,12 +719,12 @@ func (q *Queue) Cancel(id int64) (Job, error) {
 
 // Move swaps a waiting job with its neighbor in the lane: delta -1 moves it one
 // place earlier, +1 one place later. Running jobs stay put.
-func (q *Queue) Move(id int64, delta int) (Job, error) {
+func (q *Queue) Move(id int64, delta int) (_ Job, err error) {
 	if delta != -1 && delta != 1 {
 		return Job{}, fmt.Errorf("%w: delta must be -1 or 1", ErrInvalid)
 	}
 	q.mu.Lock()
-	defer q.mu.Unlock()
+	defer q.done(&err)
 	j, err := q.get(id)
 	if err != nil {
 		return Job{}, err
@@ -656,9 +753,9 @@ func (q *Queue) Move(id int64, delta int) (Job, error) {
 
 // SetPaused pauses or resumes a lane. A paused lane's running job finishes,
 // but nothing new starts.
-func (q *Queue) SetPaused(laneName string, paused bool) (LaneState, error) {
+func (q *Queue) SetPaused(laneName string, paused bool) (_ LaneState, err error) {
 	q.mu.Lock()
-	defer q.mu.Unlock()
+	defer q.done(&err)
 	ls := q.lane(laneName).state
 	ls.Paused = paused
 	if err := q.commit(record{Lane: &ls}); err != nil {
@@ -672,7 +769,7 @@ func (q *Queue) SetPaused(laneName string, paused bool) (LaneState, error) {
 // Get returns one job.
 func (q *Queue) Get(id int64) (Job, error) {
 	q.mu.Lock()
-	defer q.mu.Unlock()
+	defer q.done(nil)
 	j, err := q.get(id)
 	return j.Public(), err
 }
@@ -691,7 +788,7 @@ type Filter struct {
 // how many match in total.
 func (q *Queue) List(f Filter) ([]Job, int) {
 	q.mu.Lock()
-	defer q.mu.Unlock()
+	defer q.done(nil)
 	var out []Job
 	for _, j := range q.jobs {
 		if f.Lane != nil && j.Lane != *f.Lane {
@@ -731,7 +828,7 @@ func (q *Queue) List(f Filter) ([]Job, int) {
 // Lanes summarizes every lane.
 func (q *Queue) Lanes() []LaneSummary {
 	q.mu.Lock()
-	defer q.mu.Unlock()
+	defer q.done(nil)
 	byLane := map[string]map[State]int{}
 	for _, j := range q.jobs {
 		if byLane[j.Lane] == nil {
