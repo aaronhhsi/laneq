@@ -717,6 +717,25 @@ func (q *Queue) Cancel(id int64) (_ Job, err error) {
 	return q.jobs[id].Public(), nil
 }
 
+// Hold returns a queued job to held, undoing a release: it waits for the next
+// release instead of running.
+func (q *Queue) Hold(id int64) (_ Job, err error) {
+	q.mu.Lock()
+	defer q.done(&err)
+	j, err := q.get(id)
+	if err != nil {
+		return Job{}, err
+	}
+	if j.State != Queued {
+		return Job{}, fmt.Errorf("%w: can't hold a %s job", ErrBadState, j.State)
+	}
+	j.State = Held
+	if err := q.put(j); err != nil {
+		return Job{}, err
+	}
+	return q.jobs[id].Public(), nil
+}
+
 // Move swaps a waiting job with its neighbor in the lane: delta -1 moves it one
 // place earlier, +1 one place later. Running jobs stay put.
 func (q *Queue) Move(id int64, delta int) (_ Job, err error) {

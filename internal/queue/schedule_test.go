@@ -150,6 +150,42 @@ func TestDisabledScheduleDoesNothing(t *testing.T) {
 	}
 }
 
+func TestReenabledScheduleDoesNotCatchUpDaysItWasOff(t *testing.T) {
+	q, c, _ := newNightly(t, 30)
+	s := q.Schedules()[0].Schedule
+	s.Enabled = false
+	q.SetSchedule(s)
+	c.Add(3 * 24 * time.Hour) // off for three nights
+	s.Enabled = true
+	q.SetSchedule(s)
+	if got := runSchedules(t, q); len(got) != 0 {
+		t.Fatalf("re-enabling released %d for days the schedule was off", len(got))
+	}
+	c.Add(24 * time.Hour)
+	if got := runSchedules(t, q); len(got) != 3 {
+		t.Fatalf("next night released %d, want 3", len(got))
+	}
+}
+
+func TestHoldUndoesRelease(t *testing.T) {
+	q, _, _ := newQueue(t)
+	a := enqueue(t, q, EnqueueRequest{Type: "x", Lane: "l", Hold: true})
+	b := enqueue(t, q, EnqueueRequest{Type: "x", Lane: "l", Hold: true})
+	q.Release("l", 2, time.Time{})
+	if _, err := q.Hold(b.ID); err != nil {
+		t.Fatal(err)
+	}
+	l := mustClaimID(t, q, a.ID)
+	q.Complete(l.Job.ID, l.Token, nil)
+	mustClaimNone(t, q) // b is held again
+	if got, _ := q.Release("l", 1, time.Time{}); len(got) != 1 || got[0].ID != b.ID {
+		t.Fatalf("release after hold: %+v", got)
+	}
+	if _, err := q.Hold(a.ID); err == nil {
+		t.Fatal("held a finished job")
+	}
+}
+
 func TestBadSchedulesRejected(t *testing.T) {
 	q, _, _ := newQueue(t)
 	for _, s := range []Schedule{{Lane: "l", At: "25:00"}, {At: "00:00"}, {Lane: "l", At: "00:00", Count: -1}} {

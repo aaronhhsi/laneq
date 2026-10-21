@@ -106,9 +106,11 @@ func (q *Queue) SetSchedule(s Schedule) (_ ScheduleStatus, err error) {
 	q.mu.Lock()
 	defer q.done(&err)
 	now := q.opts.Now()
-	if old, ok := q.schedules[s.Lane]; ok && s.At == old.At {
-		s.LastRun = old.LastRun // keep progress; changing the time restarts from now
+	if old, ok := q.schedules[s.Lane]; ok && s.At == old.At && old.Enabled {
+		s.LastRun = old.LastRun // keep progress
 	} else {
+		// New, re-timed, or switched back on: start from now. Days a schedule
+		// was off aren't missed runs, so they're never caught up.
 		s.LastRun = s.prevSlot(now)
 	}
 	s = cloneSchedule(s)

@@ -6,6 +6,7 @@
 //	POST /v1/jobs/{id}/retry         retry a dead job (or skip its backoff)
 //	POST /v1/jobs/{id}/cancel        cancel
 //	POST /v1/jobs/{id}/move          swap with a neighbor in its lane   {delta: -1 | 1}
+//	POST /v1/jobs/{id}/hold          undo a release: queued → held
 //	POST /v1/claim                   lease a job        {worker, types, lease_seconds, wait_seconds} → 200 {job, token} | 204
 //	POST /v1/jobs/{id}/heartbeat     extend the lease   {token, checkpoint, lease_seconds}
 //	POST /v1/jobs/{id}/complete      finish             {token, result}
@@ -56,6 +57,7 @@ func Handler(q *queue.Queue, opts Options) http.Handler {
 		mux.Handle("GET "+prefix, http.StripPrefix(prefix, http.FileServer(http.Dir(dir))))
 	}
 	mux.HandleFunc("POST /v1/jobs/{id}/move", s.withID(s.move))
+	mux.HandleFunc("POST /v1/jobs/{id}/hold", s.withID(func(id int64, r *http.Request) (any, error) { return s.q.Hold(id) }))
 	mux.HandleFunc("GET /v1/schedules", func(w http.ResponseWriter, r *http.Request) {
 		out := s.q.Schedules()
 		if out == nil {

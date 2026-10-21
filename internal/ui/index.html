@@ -159,6 +159,7 @@ async function act(fn, confirmText) {
 const move = (id, delta) => act(() => api("POST", `/v1/jobs/${id}/move`, { delta }));
 const skip = id => act(() => api("POST", `/v1/jobs/${id}/cancel`), "Skip this post? It won't be posted.");
 const retry = id => act(() => api("POST", `/v1/jobs/${id}/retry`));
+const hold = id => act(() => api("POST", `/v1/jobs/${id}/hold`));
 const setTonight = (lane, day, count) => act(() => api("POST", `/v1/schedules/${encodeURIComponent(lane)}/override`, { day, count }));
 const pause = (lane, paused) => act(() => api("POST", `/v1/lanes/${encodeURIComponent(lane)}/${paused ? "pause" : "resume"}`));
 function postNow(lane) {
@@ -324,7 +325,8 @@ function render() {
       <h2>Posting now</h2>
       <div class="list">
         ${running.map(j => item(j, `<span class="chip ok">running</span>`, ` · attempt ${j.attempts} on ${esc(j.worker)}`)).join("")}
-        ${waiting.map(j => item(j, `<span class="chip${j.last_error ? " warn" : ""}">${j.last_error ? "retrying" : "up next"} ${esc(fmtIn(new Date(j.run_at) - Date.now()))}</span>`,
+        ${waiting.map(j => item(j, `<span class="chip${j.last_error ? " warn" : ""}">${j.last_error ? "retrying" : "up next"} ${esc(fmtIn(new Date(j.run_at) - Date.now()))}</span>`
+            + (j.lane ? ` <button onclick="hold(${j.id})" title="Put it back in line for a later run">Hold back</button>` : ""),
             j.attempts ? ` · ${j.attempts} attempts so far` : "")).join("")}
       </div>
     </section>` : ""}
