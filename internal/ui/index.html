@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>laneq</title>
+<style>
+  :root {
+    --bg: #f6f6f4; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6b66; --line: #e4e4df;
+    --accent: #3d5afe; --accent-ink: #ffffff; --ok: #1b7f4b; --warn: #a15c00; --bad: #b3261e;
+    --chip: #efefeb; --shadow: 0 1px 2px rgba(0,0,0,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141413; --panel: #1e1e1c; --ink: #ecece8; --muted: #9b9b94; --line: #2e2e2b;
+      --accent: #8c9eff; --accent-ink: #10132b; --ok: #6fcf97; --warn: #f2b45a; --bad: #f28b82;
+      --chip: #2a2a27; --shadow: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 24px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 5; }
+  header h1 { font-size: 16px; margin: 0; letter-spacing: .02em; }
+  header .grow { flex: 1; }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 60px; display: grid; gap: 20px; }
+  section.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); padding: 16px 18px; }
+  h2 { font-size: 15px; margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
+  h3 { font-size: 13px; margin: 18px 0 8px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+  .muted { color: var(--muted); }
+  .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .chip { background: var(--chip); border-radius: 999px; padding: 2px 9px; font-size: 12px; white-space: nowrap; }
+  .chip.ok { color: var(--ok); } .chip.warn { color: var(--warn); } .chip.bad { color: var(--bad); }
+  button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 7px; padding: 5px 11px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--muted); }
+  button:disabled { opacity: .4; cursor: default; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button.danger { color: var(--bad); }
+  button.icon { padding: 3px 8px; }
+  input[type=time], input[type=number] { font: inherit; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
+  .stepper { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .stepper button { border: 0; border-radius: 0; padding: 4px 12px; font-size: 16px; }
+  .stepper output { min-width: 34px; text-align: center; font-weight: 700; font-size: 16px; }
+  .next { display: grid; grid-template-columns: 1fr auto; gap: 6px 16px; align-items: center; }
+  .next .when { font-size: 22px; font-weight: 700; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+  .card { border: 1px solid var(--line); border-radius: 9px; overflow: hidden; background: var(--bg); display: flex; flex-direction: column; }
+  .thumb { position: relative; aspect-ratio: 4 / 5; background: var(--chip); cursor: zoom-in; }
+  .thumb img, .thumb video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .thumb .count { position: absolute; top: 8px; right: 8px; background: rgba(0,0,0,.65); color: #fff; border-radius: 6px; padding: 1px 7px; font-size: 12px; }
+  .thumb .kind { position: absolute; bottom: 8px; left: 8px; background: rgba(0,0,0,.65); color: #fff; border-radius: 6px; padding: 1px 7px; font-size: 12px; }
+  .thumb .order { position: absolute; top: 8px; left: 8px; background: var(--accent); color: var(--accent-ink); border-radius: 6px; padding: 1px 8px; font-weight: 700; font-size: 12px; }
+  .card .body { padding: 9px 10px; display: grid; gap: 6px; }
+  .card .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card .actions { display: flex; gap: 6px; }
+  .card .actions .grow { flex: 1; }
+  .list { display: grid; gap: 6px; }
+  .item { display: grid; grid-template-columns: 56px 1fr auto; gap: 12px; align-items: center; padding: 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+  .item .mini { width: 56px; height: 70px; border-radius: 5px; overflow: hidden; background: var(--chip); cursor: zoom-in; }
+  .item .mini img, .item .mini video { width: 100%; height: 100%; object-fit: cover; }
+  .item .meta { min-width: 0; }
+  .item .meta .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .err { color: var(--bad); font-size: 12px; white-space: pre-wrap; word-break: break-word; max-height: 4.5em; overflow: auto; }
+  .night { display: grid; grid-template-columns: 110px 1fr; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); align-items: start; }
+  .night .date { font-weight: 600; padding-top: 4px; }
+  .strip { display: flex; gap: 8px; flex-wrap: wrap; }
+  .strip .mini { width: 64px; height: 80px; border-radius: 6px; overflow: hidden; background: var(--chip); cursor: zoom-in; position: relative; }
+  .strip .mini img, .strip .mini video { width: 100%; height: 100%; object-fit: cover; }
+  .empty { color: var(--muted); padding: 8px 0; }
+  .banner { padding: 10px 14px; border-radius: 8px; background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); }
+  dialog { border: 0; border-radius: 12px; padding: 0; max-width: min(960px, 96vw); width: 100%; background: var(--panel); color: var(--ink); }
+  dialog::backdrop { background: rgba(0,0,0,.6); }
+  dialog .top { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  dialog .top .grow { flex: 1; }
+  dialog .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; padding: 14px; max-height: 70vh; overflow: auto; }
+  dialog .gallery img, dialog .gallery video { width: 100%; border-radius: 6px; display: block; }
+  dialog pre { margin: 0 14px 14px; padding: 10px; background: var(--bg); border-radius: 8px; white-space: pre-wrap; font: 13px/1.4 ui-monospace, Consolas, monospace; }
+  .settings { display: none; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); }
+  .settings.open { display: flex; }
+  a { color: var(--accent); }
+  @media (max-width: 640px) {
+    header { padding: 12px 16px; }
+    .next { grid-template-columns: 1fr; }
+    .night { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>laneq</h1>
+  <span class="grow"></span>
+  <span id="conn" class="chip">connecting…</span>
+</header>
+<main id="app"></main>
+
+<dialog id="viewer">
+  <div class="top"><strong id="v-title"></strong><span class="grow"></span><button onclick="viewer.close()">Close</button></div>
+  <div class="gallery" id="v-gallery"></div>
+  <pre id="v-caption"></pre>
+</dialog>
+
+<script>
+const $ = (sel, el = document) => el.querySelector(sel);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const UPCOMING_PAGE = 30;
+const state = { upcoming: {}, settingsOpen: {}, busy: false, error: "" };
+
+async function api(method, path, body) {
+  const r = await fetch(path, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+  if (r.status === 204) return null;
+  const data = await r.json().catch(() => null);
+  if (!r.ok) throw new Error((data && data.error) || r.statusText);
+  return data;
+}
+const jobs = (q) => api("GET", "/v1/jobs?" + new URLSearchParams(q));
+
+// --- formatting ---
+const dayKey = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const fmtNight = d => d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+const fmtTime = d => d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+const fmtWhen = s => { const d = new Date(s); return `${fmtNight(d)} ${fmtTime(d)}`; };
+function fmtIn(ms) {
+  if (ms <= 0) return "now";
+  const m = Math.round(ms / 60000), h = Math.floor(m / 60), d = Math.floor(h / 24);
+  if (d >= 1) return `in ${d}d ${h % 24}h`;
+  if (h >= 1) return `in ${h}h ${m % 60}m`;
+  return `in ${m}m`;
+}
+
+// --- job previews (payload.preview = {title, subtitle, caption, media: [{url, type}]}) ---
+const preview = j => (j.payload && j.payload.preview) || {};
+const titleOf = j => preview(j).title || j.key || `${j.type} #${j.id}`;
+const media = j => preview(j).media || [];
+function mediaTag(m, attrs = "") {
+  if (!m) return "";
+  return m.type === "image"
+    ? `<img src="${esc(m.url)}" loading="lazy" alt="" ${attrs}>`
+    : `<video src="${esc(m.url)}#t=0.5" preload="metadata" muted playsinline ${attrs}></video>`;
+}
+const kindLabel = j => ({ carousel: "Carousel", image: "Photo", reel: "Reel" }[preview(j).kind] || j.type);
+
+function openViewer(id) {
+  const j = state.byId[id];
+  if (!j) return;
+  $("#v-title").textContent = `${titleOf(j)} · ${kindLabel(j)}`;
+  $("#v-gallery").innerHTML = media(j).map(m => m.type === "image"
+    ? `<img src="${esc(m.url)}" alt="">`
+    : `<video src="${esc(m.url)}" controls muted playsinline></video>`).join("") || `<div class="muted">No preview</div>`;
+  $("#v-caption").textContent = preview(j).caption || JSON.stringify(j.payload, null, 2);
+  viewer.showModal();
+}
+
+// --- actions ---
+async function act(fn, confirmText) {
+  if (confirmText && !confirm(confirmText)) return;
+  try { state.busy = true; await fn(); state.error = ""; }
+  catch (e) { state.error = e.message; }
+  finally { state.busy = false; refresh(); }
+}
+const move = (id, delta) => act(() => api("POST", `/v1/jobs/${id}/move`, { delta }));
+const skip = id => act(() => api("POST", `/v1/jobs/${id}/cancel`), "Skip this post? It won't be posted.");
+const retry = id => act(() => api("POST", `/v1/jobs/${id}/retry`));
+const setTonight = (lane, day, count) => act(() => api("POST", `/v1/schedules/${encodeURIComponent(lane)}/override`, { day, count }));
+const pause = (lane, paused) => act(() => api("POST", `/v1/lanes/${encodeURIComponent(lane)}/${paused ? "pause" : "resume"}`));
+const postNow = lane => act(() => api("POST", `/v1/lanes/${encodeURIComponent(lane)}/release`, { n: 1 }),
+  "Post the next one right now? This publishes it for real.");
+function saveSettings(lane) {
+  const at = $(`#at-${CSS.escape(lane)}`).value, count = +$(`#count-${CSS.escape(lane)}`).value;
+  const s = state.schedules.find(s => s.lane === lane);
+  act(() => api("PUT", `/v1/schedules/${encodeURIComponent(lane)}`, { ...s, at, count }));
+}
+function toggleSettings(lane) { state.settingsOpen[lane] = !state.settingsOpen[lane]; render(); }
+function moreUpcoming(lane) { state.upcoming[lane] = (state.upcoming[lane] || UPCOMING_PAGE) + UPCOMING_PAGE; refresh(); }
+
+// --- data ---
+async function refresh() {
+  try {
+    const [lanes, schedules, active, dead, history] = await Promise.all([
+      api("GET", "/v1/lanes"), api("GET", "/v1/schedules"),
+      jobs({ state: "queued,running" }), jobs({ state: "dead" }),
+      jobs({ state: "succeeded", newest: "true", limit: 12 }),
+    ]);
+    const held = {};
+    await Promise.all(schedules.map(async s => {
+      held[s.lane] = await jobs({ lane: s.lane, state: "held", limit: s.next_count + (state.upcoming[s.lane] || UPCOMING_PAGE) });
+    }));
+    Object.assign(state, { lanes, schedules, active, dead, history, held, loaded: true });
+    state.byId = {};
+    for (const j of [...active, ...dead, ...history, ...Object.values(held).flat()]) state.byId[j.id] = j;
+    $("#conn").textContent = "live"; $("#conn").className = "chip ok";
+  } catch (e) {
+    $("#conn").textContent = "server unreachable"; $("#conn").className = "chip bad";
+  }
+  render();
+}
+
+// --- rendering ---
+function card(j, order, canUp, canDown) {
+  const m = media(j);
+  return `<div class="card">
+    <div class="thumb" onclick="openViewer(${j.id})">
+      ${mediaTag(m[0])}
+      ${order ? `<span class="order">#${order}</span>` : ""}
+      ${m.length > 1 ? `<span class="count">1/${m.length}</span>` : ""}
+      <span class="kind">${esc(kindLabel(j))}</span>
+    </div>
+    <div class="body">
+      <div class="title" title="${esc(titleOf(j))}">${esc(titleOf(j))}</div>
+      ${preview(j).subtitle ? `<div class="muted">${esc(preview(j).subtitle)}</div>` : ""}
+      <div class="actions">
+        <button class="icon" title="Earlier" onclick="move(${j.id},-1)" ${canUp ? "" : "disabled"}>↑</button>
+        <button class="icon" title="Later" onclick="move(${j.id},1)" ${canDown ? "" : "disabled"}>↓</button>
+        <span class="grow"></span>
+        <button class="danger" onclick="skip(${j.id})">Skip</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function item(j, right, extra = "") {
+  return `<div class="item">
+    <div class="mini" onclick="openViewer(${j.id})">${mediaTag(media(j)[0])}</div>
+    <div class="meta">
+      <div class="title">${esc(titleOf(j))}</div>
+      <div class="muted">${esc(kindLabel(j))}${j.lane ? " · " + esc(j.lane) : ""}${extra}</div>
+      ${j.last_error ? `<div class="err">${esc(j.last_error)}</div>` : ""}
+    </div>
+    <div class="row">${right}</div>
+  </div>`;
+}
+
+function lanePanel(s) {
+  const lane = state.lanes.find(l => l.name === s.lane) || { counts: {} };
+  const held = state.held[s.lane] || [];
+  const next = new Date(s.next_run);
+  const nightKey = dayKey(next);
+  const tonight = held.slice(0, s.next_count);
+  const rest = held.slice(s.next_count);
+  const overridden = s.overrides && nightKey in s.overrides;
+  const blocked = state.dead.some(j => j.lane === s.lane);
+  const nights = [];
+  for (let i = 0, d = 1; i < rest.length; d++) {
+    const day = new Date(next); day.setDate(day.getDate() + d);
+    const n = (s.overrides && s.overrides[dayKey(day)]) ?? s.count;
+    if (n === 0) { nights.push({ day, jobs: [] }); continue; }
+    nights.push({ day, jobs: rest.slice(i, i + n) }); i += n;
+    if (d > 400) break;
+  }
+  const leftNights = s.count ? Math.ceil(s.held / s.count) : 0;
+  const L = esc(JSON.stringify(s.lane));
+  return `<section class="panel">
+    <h2>${esc(s.lane)}
+      ${lane.paused ? `<span class="chip warn">paused</span>` : s.enabled ? `<span class="chip ok">scheduled</span>` : `<span class="chip">schedule off</span>`}
+      ${blocked ? `<span class="chip bad">blocked: needs attention</span>` : ""}
+      <span class="grow" style="flex:1"></span>
+      <button onclick='pause(${L}, ${!lane.paused})'>${lane.paused ? "Resume" : "Pause"}</button>
+      <button onclick='toggleSettings(${L})'>Settings</button>
+    </h2>
+    <div class="next">
+      <div>
+        <div class="muted">Next run</div>
+        <div class="when">${esc(fmtNight(next))}, ${esc(fmtTime(next))} <span class="muted" style="font-size:14px;font-weight:400">${esc(fmtIn(next - Date.now()))}</span></div>
+        <div class="muted">${s.held} posts waiting · about ${leftNights} nights at ${s.count} a night</div>
+      </div>
+      <div>
+        <div class="muted">Posts this run${overridden ? ` (default ${s.count})` : ""}</div>
+        <div class="row">
+          <span class="stepper">
+            <button onclick='setTonight(${L}, "${nightKey}", ${Math.max(0, s.next_count - 1)})' ${s.next_count <= 0 ? "disabled" : ""}>−</button>
+            <output>${s.next_count}</output>
+            <button onclick='setTonight(${L}, "${nightKey}", ${s.next_count + 1})' ${s.next_count >= 25 ? "disabled" : ""}>+</button>
+          </span>
+          ${overridden ? `<button onclick='setTonight(${L}, "${nightKey}", -1)'>Reset</button>` : ""}
+        </div>
+      </div>
+    </div>
+    <div class="settings ${state.settingsOpen[s.lane] ? "open" : ""}">
+      <label>Daily at <input type="time" id="at-${esc(s.lane)}" value="${esc(s.at)}"></label>
+      <label>Posts a night <input type="number" id="count-${esc(s.lane)}" min="0" max="25" value="${s.count}" style="width:60px"></label>
+      <button class="primary" onclick='saveSettings(${L})'>Save</button>
+      <span class="grow" style="flex:1"></span>
+      <button onclick='postNow(${L})' ${held.length ? "" : "disabled"}>Post next one now</button>
+    </div>
+
+    <h3>This run</h3>
+    ${tonight.length ? `<div class="cards">${tonight.map((j, i) => card(j, i + 1, i > 0, i < held.length - 1)).join("")}</div>`
+                     : `<div class="empty">Nothing to post${s.next_count === 0 ? " — this run is set to 0" : ""}.</div>`}
+
+    <h3>Coming up</h3>
+    ${nights.length ? nights.map(n => `<div class="night">
+        <div class="date">${esc(fmtNight(n.day))}</div>
+        <div class="strip">${n.jobs.length ? n.jobs.map(j => `<div class="mini" title="${esc(titleOf(j))}" onclick="openViewer(${j.id})">${mediaTag(media(j)[0])}</div>`).join("") : `<span class="muted">no posts</span>`}</div>
+      </div>`).join("") : `<div class="empty">Nothing else queued.</div>`}
+    ${held.length < s.held ? `<div class="row" style="margin-top:10px"><button onclick='moreUpcoming(${L})'>Show more</button><span class="muted">${s.held - held.length} more</span></div>` : ""}
+  </section>`;
+}
+
+function render() {
+  const app = $("#app");
+  if (!state.loaded) { app.innerHTML = `<div class="empty">Loading…</div>`; return; }
+  const open = viewer.open;
+  const running = state.active.filter(j => j.state === "running");
+  const waiting = state.active.filter(j => j.state === "queued");
+  app.innerHTML = `
+    ${state.error ? `<div class="banner">${esc(state.error)}</div>` : ""}
+    ${state.dead.length ? `<section class="panel">
+      <h2>Needs attention <span class="chip bad">${state.dead.length}</span></h2>
+      <p class="muted" style="margin-top:-6px">These failed and won't be retried on their own. Everything after them in the same lane waits, so posts never go up out of order.</p>
+      <div class="list">${state.dead.map(j => item(j, `<button class="primary" onclick="retry(${j.id})">Retry</button><button class="danger" onclick="skip(${j.id})">Skip</button>`, ` · ${j.attempts} attempts`)).join("")}</div>
+    </section>` : ""}
+    ${running.length || waiting.length ? `<section class="panel">
+      <h2>Posting now</h2>
+      <div class="list">
+        ${running.map(j => item(j, `<span class="chip ok">running</span>`, ` · attempt ${j.attempts} on ${esc(j.worker)}`)).join("")}
+        ${waiting.map(j => item(j, `<span class="chip${j.last_error ? " warn" : ""}">${j.last_error ? "retrying" : "up next"} ${esc(fmtIn(new Date(j.run_at) - Date.now()))}</span>`,
+            j.attempts ? ` · ${j.attempts} attempts so far` : "")).join("")}
+      </div>
+    </section>` : ""}
+    ${state.schedules.length ? state.schedules.map(lanePanel).join("") : `<section class="panel"><div class="empty">No schedules yet. Create one with PUT /v1/schedules/{lane}.</div></section>`}
+    <section class="panel">
+      <h2>Recently posted</h2>
+      ${state.history.length ? `<div class="list">${state.history.map(j => item(j,
+          j.result && j.result.permalink ? `<a href="${esc(j.result.permalink)}" target="_blank" rel="noopener">Open ↗</a>` : `<span class="chip">${esc((j.result && j.result.mode) || "done")}</span>`,
+          ` · ${esc(fmtWhen(j.finished_at))}`)).join("")}</div>` : `<div class="empty">Nothing yet.</div>`}
+    </section>`;
+  if (open && !viewer.open) viewer.showModal();
+}
+
+refresh();
+setInterval(() => { if (!state.busy && !viewer.open) refresh(); }, 5000);
+setInterval(() => { if (!viewer.open) render(); }, 30000); // keep countdowns fresh
+</script>
+</body>
+</html>

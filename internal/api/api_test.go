@@ -16,7 +16,7 @@ func newServer(t *testing.T) *httptest.Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(Handler(q))
+	srv := httptest.NewServer(Handler(q, Options{}))
 	t.Cleanup(func() { srv.Close(); q.Close() })
 	return srv
 }

@@ -82,6 +82,7 @@ type Queue struct {
 	jobs       map[int64]*Job
 	byKey      map[string]int64
 	lanes      map[string]*lane
+	schedules  map[string]Schedule
 	nextID     int64
 	changed    chan struct{} // closed and replaced on every change, waking waiters
 }
@@ -96,12 +97,13 @@ func Open(opts Options) (*Queue, error) {
 		return nil, err
 	}
 	q := &Queue{
-		opts:    opts,
-		jobs:    map[int64]*Job{},
-		byKey:   map[string]int64{},
-		lanes:   map[string]*lane{},
-		nextID:  1,
-		changed: make(chan struct{}),
+		opts:      opts,
+		jobs:      map[int64]*Job{},
+		byKey:     map[string]int64{},
+		lanes:     map[string]*lane{},
+		schedules: map[string]Schedule{},
+		nextID:    1,
+		changed:   make(chan struct{}),
 	}
 	snap, err := readSnapshot(opts.Dir)
 	if err != nil {
@@ -113,6 +115,9 @@ func Open(opts Options) (*Queue, error) {
 		}
 		for _, j := range snap.Jobs {
 			q.applyJob(j)
+		}
+		for _, s := range snap.Schedules {
+			q.schedules[s.Lane] = s
 		}
 		q.nextID = max(q.nextID, snap.NextID)
 	}
@@ -140,6 +145,9 @@ func (q *Queue) apply(r record) {
 	}
 	if r.Job != nil {
 		q.applyJob(r.Job)
+	}
+	if r.Schedule != nil {
+		q.schedules[r.Schedule.Lane] = *r.Schedule
 	}
 }
 
@@ -202,6 +210,9 @@ func (q *Queue) snapshotLocked() error {
 	slices.SortFunc(s.Jobs, func(a, b *Job) int { return int(a.ID - b.ID) })
 	for _, l := range q.lanes {
 		s.Lanes = append(s.Lanes, l.state)
+	}
+	for _, sc := range q.schedules {
+		s.Schedules = append(s.Schedules, sc)
 	}
 	if err := writeSnapshot(q.opts.Dir, s); err != nil {
 		return err
@@ -609,6 +620,40 @@ func (q *Queue) Cancel(id int64) (Job, error) {
 	return q.jobs[id].Public(), nil
 }
 
+// Move swaps a waiting job with its neighbor in the lane: delta -1 moves it one
+// place earlier, +1 one place later. Running jobs stay put.
+func (q *Queue) Move(id int64, delta int) (Job, error) {
+	if delta != -1 && delta != 1 {
+		return Job{}, fmt.Errorf("%w: delta must be -1 or 1", ErrInvalid)
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	j, err := q.get(id)
+	if err != nil {
+		return Job{}, err
+	}
+	if j.Lane == "" || j.State == Running || j.State.Finished() {
+		return Job{}, fmt.Errorf("%w: only a waiting job in a lane can move", ErrBadState)
+	}
+	l := q.lanes[j.Lane]
+	i := slices.Index(l.active, id)
+	k := i + delta
+	if k < 0 || k >= len(l.active) {
+		return Job{}, fmt.Errorf("%w: already at the %s", ErrBadState, map[int]string{-1: "front", 1: "back"}[delta])
+	}
+	other := *q.jobs[l.active[k]]
+	if other.State == Running {
+		return Job{}, fmt.Errorf("%w: can't move past a running job", ErrBadState)
+	}
+	now := q.opts.Now()
+	j.Seq, other.Seq = other.Seq, j.Seq
+	j.UpdatedAt, other.UpdatedAt = now, now
+	if err := q.commit(record{Job: &j}, record{Job: &other}); err != nil {
+		return Job{}, err
+	}
+	return q.jobs[id].Public(), nil
+}
+
 // SetPaused pauses or resumes a lane. A paused lane's running job finishes,
 // but nothing new starts.
 func (q *Queue) SetPaused(laneName string, paused bool) (LaneState, error) {
@@ -637,10 +682,14 @@ type Filter struct {
 	Lane   *string
 	States []State
 	Type   string
+	Newest bool // reverse order: latest first (e.g. for history)
+	Offset int
+	Limit  int // 0 = all
 }
 
-// List returns matching jobs ordered by lane, then lane order.
-func (q *Queue) List(f Filter) []Job {
+// List returns a page of matching jobs ordered by lane, then lane order, and
+// how many match in total.
+func (q *Queue) List(f Filter) ([]Job, int) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	var out []Job
@@ -663,9 +712,20 @@ func (q *Queue) List(f Filter) []Job {
 			}
 			return 1
 		}
+		if f.Newest {
+			if !a.FinishedAt.Equal(b.FinishedAt) {
+				return b.FinishedAt.Compare(a.FinishedAt)
+			}
+			return int(b.Seq - a.Seq)
+		}
 		return int(a.Seq - b.Seq)
 	})
-	return out
+	total := len(out)
+	out = out[min(f.Offset, total):]
+	if f.Limit > 0 && len(out) > f.Limit {
+		out = out[:f.Limit]
+	}
+	return out, total
 }
 
 // Lanes summarizes every lane.

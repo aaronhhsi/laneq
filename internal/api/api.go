@@ -1,10 +1,11 @@
 // Package api serves a Queue over HTTP/JSON, so workers can be written in any language.
 //
 //	POST /v1/jobs                    enqueue            {type, lane, key, payload, run_at, hold, max_attempts}
-//	GET  /v1/jobs?lane=&state=&type= list
+//	GET  /v1/jobs?lane=&state=&type=&newest=&offset=&limit=   list (total in X-Total-Count)
 //	GET  /v1/jobs/{id}               get
 //	POST /v1/jobs/{id}/retry         retry a dead job (or skip its backoff)
 //	POST /v1/jobs/{id}/cancel        cancel
+//	POST /v1/jobs/{id}/move          swap with a neighbor in its lane   {delta: -1 | 1}
 //	POST /v1/claim                   lease a job        {worker, types, lease_seconds, wait_seconds} → 200 {job, token} | 204
 //	POST /v1/jobs/{id}/heartbeat     extend the lease   {token, checkpoint, lease_seconds}
 //	POST /v1/jobs/{id}/complete      finish             {token, result}
@@ -12,6 +13,11 @@
 //	GET  /v1/lanes                   lane summaries
 //	POST /v1/lanes/{lane}/release    release held jobs  {n, run_at}
 //	POST /v1/lanes/{lane}/pause | /resume
+//	GET  /v1/schedules               schedules with their next run
+//	PUT  /v1/schedules/{lane}        set a daily release {enabled, at: "HH:MM", count, gap_seconds, max_catch_up}
+//	POST /v1/schedules/{lane}/override   one day's count {day: "YYYY-MM-DD", count} (count < 0 clears it)
+//	GET  /files/{name}/...           read-only static files mounted with Options.Files (e.g. media previews)
+//	GET  /                           the dashboard
 //	GET  /healthz
 package api
 
@@ -25,7 +31,15 @@ import (
 	"time"
 
 	"github.com/aaronhhsi/laneq/internal/queue"
+	"github.com/aaronhhsi/laneq/internal/ui"
 )
+
+// Options configures the handler.
+type Options struct {
+	// Files mounts directories read-only at /files/<name>/, so job payloads can
+	// point the dashboard at previews (e.g. "/files/archive/2023-10/1.jpg").
+	Files map[string]string
+}
 
 // MaxWait caps how long a claim may long-poll.
 const MaxWait = 60 * time.Second
@@ -33,9 +47,24 @@ const MaxWait = 60 * time.Second
 type server struct{ q *queue.Queue }
 
 // Handler returns the HTTP API for q.
-func Handler(q *queue.Queue) http.Handler {
+func Handler(q *queue.Queue, opts Options) http.Handler {
 	s := &server{q}
 	mux := http.NewServeMux()
+	mux.Handle("GET /{$}", ui.Handler())
+	for name, dir := range opts.Files {
+		prefix := "/files/" + name + "/"
+		mux.Handle("GET "+prefix, http.StripPrefix(prefix, http.FileServer(http.Dir(dir))))
+	}
+	mux.HandleFunc("POST /v1/jobs/{id}/move", s.withID(s.move))
+	mux.HandleFunc("GET /v1/schedules", func(w http.ResponseWriter, r *http.Request) {
+		out := s.q.Schedules()
+		if out == nil {
+			out = []queue.ScheduleStatus{}
+		}
+		writeJSON(w, 200, out)
+	})
+	mux.HandleFunc("PUT /v1/schedules/{lane}", s.setSchedule)
+	mux.HandleFunc("POST /v1/schedules/{lane}/override", s.override)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("POST /v1/jobs", s.enqueue)
 	mux.HandleFunc("GET /v1/jobs", s.list)
@@ -83,11 +112,56 @@ func (s *server) list(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	f.Type = v.Get("type")
-	jobs := s.q.List(f)
+	f.Newest = v.Get("newest") == "true"
+	f.Offset, _ = strconv.Atoi(v.Get("offset"))
+	f.Limit, _ = strconv.Atoi(v.Get("limit"))
+	f.Offset = max(f.Offset, 0)
+	jobs, total := s.q.List(f)
 	if jobs == nil {
 		jobs = []queue.Job{}
 	}
+	w.Header().Set("X-Total-Count", strconv.Itoa(total))
 	writeJSON(w, 200, jobs)
+}
+
+func (s *server) move(id int64, r *http.Request) (any, error) {
+	var req struct {
+		Delta int `json:"delta"`
+	}
+	if err := decode(r, &req); err != nil {
+		return nil, err
+	}
+	return s.q.Move(id, req.Delta)
+}
+
+func (s *server) setSchedule(w http.ResponseWriter, r *http.Request) {
+	var sc queue.Schedule
+	if !readJSON(w, r, &sc) {
+		return
+	}
+	sc.Lane = r.PathValue("lane")
+	st, err := s.q.SetSchedule(sc)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, 200, st)
+}
+
+func (s *server) override(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Day   string `json:"day"`
+		Count int    `json:"count"`
+	}
+	if !readJSON(w, r, &req) {
+		return
+	}
+	st, err := s.q.SetOverride(r.PathValue("lane"), req.Day, req.Count)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, 200, st)
 }
 
 type claimRequest struct {

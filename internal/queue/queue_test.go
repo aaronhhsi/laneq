@@ -371,7 +371,7 @@ func TestCorruptRecordStopsReplay(t *testing.T) {
 
 	q = open(t, dir, c)
 	defer q.Close()
-	if jobs := q.List(Filter{}); len(jobs) != 0 {
+	if jobs, _ := q.List(Filter{}); len(jobs) != 0 {
 		t.Fatalf("corrupt record was applied: %+v", jobs)
 	}
 }
@@ -392,7 +392,7 @@ func TestSnapshotCompactsLog(t *testing.T) {
 
 	q = open(t, dir, c)
 	defer q.Close()
-	if n := len(q.List(Filter{})); n != 25 {
+	if _, n := q.List(Filter{}); n != 25 {
 		t.Fatalf("after snapshot + replay: %d jobs, want 25", n)
 	}
 	mustClaimID(t, q, 1) // lane order rebuilt from the snapshot

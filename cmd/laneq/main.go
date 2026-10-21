@@ -1,14 +1,22 @@
-// Command laneq runs the job queue server.
+// Command laneq runs the job queue server and, optionally, a worker it supervises.
+//
+//	laneq [flags] [-- worker command...]
+//
+// Anything after "--" is run as a worker process: started with the server,
+// restarted with backoff if it exits, and stopped when the server stops.
 package main
 
 import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -16,10 +24,36 @@ import (
 	"github.com/aaronhhsi/laneq/internal/queue"
 )
 
+type mounts map[string]string
+
+func (m mounts) String() string { return fmt.Sprint(map[string]string(m)) }
+func (m mounts) Set(v string) error {
+	name, dir, ok := strings.Cut(v, "=")
+	if !ok || name == "" || dir == "" {
+		return errors.New("want name=dir")
+	}
+	m[name] = dir
+	return nil
+}
+
 func main() {
 	addr := flag.String("addr", "127.0.0.1:7070", "listen address (localhost only by default: the API has no auth)")
 	dir := flag.String("data", "laneq-data", "directory for the write-ahead log and snapshot")
+	logPath := flag.String("log", "", "append logs to this file instead of stderr")
+	files := mounts{}
+	flag.Var(files, "files", "serve a directory read-only at /files/<name>/ (name=dir; repeatable)")
 	flag.Parse()
+
+	var out io.Writer = os.Stderr
+	if *logPath != "" {
+		f, err := os.OpenFile(*logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		if err != nil {
+			log.Fatalf("open log: %v", err)
+		}
+		defer f.Close()
+		out = f
+	}
+	log.SetOutput(out)
 
 	q, err := queue.Open(queue.Options{Dir: *dir})
 	if err != nil {
@@ -29,23 +63,37 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// Record lease expiries even when no client is calling in.
-	go func() {
-		t := time.NewTicker(time.Second)
-		defer t.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-t.C:
-				if err := q.ExpireLeases(); err != nil {
-					log.Printf("expire leases: %v", err)
-				}
-			}
-		}
-	}()
+	srv := &http.Server{Addr: *addr, Handler: api.Handler(q, api.Options{Files: files}), ReadHeaderTimeout: 10 * time.Second}
+	ln, err := listen(*addr)
+	if err != nil {
+		// Most likely another laneq is already running; one per data dir is enough.
+		log.Fatalf("listen: %v", err)
+	}
 
-	srv := &http.Server{Addr: *addr, Handler: api.Handler(q), ReadHeaderTimeout: 10 * time.Second}
+	go every(ctx, time.Second, func() {
+		if err := q.ExpireLeases(); err != nil {
+			log.Printf("expire leases: %v", err)
+		}
+	})
+	// Ticks keep coming after the machine wakes from sleep, so a run that was due
+	// while it slept happens within seconds of waking.
+	go every(ctx, 10*time.Second, func() {
+		released, err := q.RunSchedules()
+		if err != nil {
+			log.Printf("schedules: %v", err)
+		}
+		for _, j := range released {
+			log.Printf("released #%d %s (%s) to run at %s", j.ID, j.Key, j.Lane, j.RunAt.Format(time.TimeOnly))
+		}
+	})
+
+	done := make(chan struct{})
+	if cmd := flag.Args(); len(cmd) > 0 {
+		go func() { supervise(ctx, cmd, out); close(done) }()
+	} else {
+		close(done)
+	}
+
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -54,10 +102,25 @@ func main() {
 	}()
 
 	log.Printf("laneq listening on http://%s (data in %s)", *addr, *dir)
-	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+	if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
+	<-done
 	if err := q.Close(); err != nil {
 		log.Printf("close: %v", err)
+	}
+}
+
+func every(ctx context.Context, d time.Duration, fn func()) {
+	fn()
+	t := time.NewTicker(d)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			fn()
+		}
 	}
 }

@@ -16,15 +16,17 @@ import (
 // "last write wins", so applying a record twice is harmless — which is what makes
 // a crash between writing a snapshot and truncating the log safe.
 type record struct {
-	Job  *Job       `json:"job,omitempty"`
-	Lane *LaneState `json:"lane,omitempty"`
+	Job      *Job       `json:"job,omitempty"`
+	Lane     *LaneState `json:"lane,omitempty"`
+	Schedule *Schedule  `json:"schedule,omitempty"`
 }
 
 // snapshot is the whole queue at one point in time.
 type snapshot struct {
-	NextID int64       `json:"next_id"`
-	Jobs   []*Job      `json:"jobs"`
-	Lanes  []LaneState `json:"lanes"`
+	NextID    int64       `json:"next_id"`
+	Jobs      []*Job      `json:"jobs"`
+	Lanes     []LaneState `json:"lanes"`
+	Schedules []Schedule  `json:"schedules,omitempty"`
 }
 
 const (
