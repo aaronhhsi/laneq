@@ -102,7 +102,7 @@
 const $ = (sel, el = document) => el.querySelector(sel);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const UPCOMING_PAGE = 30;
-const state = { upcoming: {}, settingsOpen: {}, busy: false, error: "" };
+const state = { upcoming: {}, settingsOpen: {}, nowCount: {}, busy: false, error: "" };
 
 async function api(method, path, body) {
   const r = await fetch(path, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -161,8 +161,11 @@ const skip = id => act(() => api("POST", `/v1/jobs/${id}/cancel`), "Skip this po
 const retry = id => act(() => api("POST", `/v1/jobs/${id}/retry`));
 const setTonight = (lane, day, count) => act(() => api("POST", `/v1/schedules/${encodeURIComponent(lane)}/override`, { day, count }));
 const pause = (lane, paused) => act(() => api("POST", `/v1/lanes/${encodeURIComponent(lane)}/${paused ? "pause" : "resume"}`));
-const postNow = lane => act(() => api("POST", `/v1/lanes/${encodeURIComponent(lane)}/release`, { n: 1 }),
-  "Post the next one right now? This publishes it for real.");
+function postNow(lane) {
+  const n = Math.max(1, Math.min(25, +$(`#now-${CSS.escape(lane)}`).value || 1));
+  act(() => api("POST", `/v1/lanes/${encodeURIComponent(lane)}/release`, { n }),
+    `Post the next ${n === 1 ? "post" : n + " posts"} right now? ${n === 1 ? "It goes" : "They go"} up one after another, for real.`);
+}
 function saveSettings(lane) {
   const at = $(`#at-${CSS.escape(lane)}`).value, count = +$(`#count-${CSS.escape(lane)}`).value;
   const s = state.schedules.find(s => s.lane === lane);
@@ -272,13 +275,18 @@ function lanePanel(s) {
           ${overridden ? `<button onclick='setTonight(${L}, "${nightKey}", -1)'>Reset</button>` : ""}
         </div>
       </div>
+      <div class="row" style="grid-column: 1 / -1; padding-top: 8px; border-top: 1px dashed var(--line); margin-top: 6px">
+        <span class="muted">Don't wait for the schedule:</span>
+        <input type="number" id="now-${esc(s.lane)}" min="1" max="25" value="${state.nowCount[s.lane] || 1}" style="width:60px"
+               oninput="state.nowCount[${esc(JSON.stringify(s.lane))}] = +this.value">
+        <button class="primary" onclick='postNow(${L})' ${held.length ? "" : "disabled"}>Post now</button>
+        <span class="muted">takes the next posts in line; tonight's run still posts its ${s.next_count}</span>
+      </div>
     </div>
     <div class="settings ${state.settingsOpen[s.lane] ? "open" : ""}">
       <label>Daily at <input type="time" id="at-${esc(s.lane)}" value="${esc(s.at)}"></label>
       <label>Posts a night <input type="number" id="count-${esc(s.lane)}" min="0" max="25" value="${s.count}" style="width:60px"></label>
       <button class="primary" onclick='saveSettings(${L})'>Save</button>
-      <span class="grow" style="flex:1"></span>
-      <button onclick='postNow(${L})' ${held.length ? "" : "disabled"}>Post next one now</button>
     </div>
 
     <h3>This run</h3>
