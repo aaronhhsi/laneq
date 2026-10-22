@@ -227,6 +227,49 @@ without renumbering anything else.
 
 ## 7. Failure handling: retries and dead jobs
 
+### What counts as a failure
+
+A **failure** is any attempt at a job that doesn't end with the worker reporting
+`complete` while it still holds the lease. laneq never sees *why* something went
+wrong; it only sees one of three things:
+
+| What laneq sees | Typical causes | What laneq does |
+|---|---|---|
+| **The worker reports it** (`POST /fail`) | The worker caught an error: no internet, an API refusing the request, a rate limit, a bad file | Retries after backoff, or after the worker's `retry_after`; goes straight to **dead** if the worker says `permanent` |
+| **The worker goes silent**: no heartbeat for the lease period (60 s) | The worker crashed or was killed; the machine lost power or went to sleep; the worker hung | Treats it like a reported failure ("lease expired") and retries after backoff. The stale worker's token stops working (§5) |
+| **laneq itself stops** | laneq crashed or was killed; power loss | On restart, replays the log (§2): anything acknowledged is still there. A job that was running still holds its lease; if the worker didn't survive, the lease expires and it's retried as above |
+
+Every failed attempt counts toward `max_attempts`, whichever way it failed. A job
+that keeps crashing its worker therefore ends up dead instead of looping
+forever.
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> held: enqueue (hold)
+    [*] --> queued: enqueue
+    held --> queued: release / schedule
+    queued --> held: hold, pause
+    queued --> running: claim (lease + token)
+    running --> running: heartbeat (extends lease, saves checkpoint)
+    running --> succeeded: complete
+    running --> queued: fail, or lease expires (backoff)
+    running --> dead: fail permanent, or out of attempts
+    dead --> queued: retry
+    queued --> canceled: cancel
+    held --> canceled: cancel
+    dead --> canceled: cancel
+    succeeded --> [*]
+    canceled --> [*]
+```
+
+What a retry starts from is up to the worker: the job's checkpoint (§5) carries
+whatever it saved before failing. For a step-by-step example of one worker's
+failure modes, see the Instagram pipeline that runs on laneq (each step, what
+can fail there, and what the retry does).
+
+### Retries
+
 **Decision.** A failed attempt is retried after `10s × 2^(attempt-1)`, capped at
 1 hour, with ±20% jitter. After `max_attempts` (default 5) the job goes **dead**.
 Workers can override with `retry_after` (e.g. a rate limit's reset time) or
