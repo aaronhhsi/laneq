@@ -114,6 +114,7 @@ Why it is built this way, decision by decision: [DESIGN.md](DESIGN.md).
 | `POST /v1/jobs/{id}/retry` · `/cancel` · `/move` | operator actions (`move`: `{delta: -1 or 1}`) |
 | `GET /v1/lanes` · `POST /v1/lanes/{lane}/pause` · `/resume` · `/release` | lanes (`release`: `{n, run_at}`) |
 | `GET /v1/schedules` · `PUT /v1/schedules/{lane}` · `POST /v1/schedules/{lane}/override` | daily releases |
+| `POST /v1/admin/shutdown` | clean shutdown, from this machine only: stops the supervised worker, closes the port, writes a final snapshot, exits 0 |
 
 A minimal worker:
 

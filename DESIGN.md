@@ -402,7 +402,15 @@ and confusing.) With `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, the OS closes the job
 handle when laneq exits however it exits, killing the worker and anything it
 started (ffmpeg). Verified by force-killing laneq and checking the worker died.
 
-**Code.** `cmd/laneq/supervise.go`, `cmd/laneq/hide_windows.go`.
+**Why a shutdown endpoint.** Running without a console (so nothing flashes on
+screen), laneq can't receive Ctrl+C, and Task Scheduler's "End" kills it
+outright. `POST /v1/admin/shutdown` (loopback only) triggers the same path as
+Ctrl+C: the supervisor stops the worker, the server stops accepting requests,
+the queue writes a final snapshot, and the process logs "laneq stopped cleanly"
+and exits 0. A test runs the real binary with a supervised child and checks
+both processes exit and both ports are free afterwards.
+
+**Code.** `cmd/laneq/supervise.go`, `cmd/laneq/hide_windows.go`, `cmd/laneq/main.go`.
 
 ---
 

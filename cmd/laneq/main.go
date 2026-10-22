@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -63,7 +64,20 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	srv := &http.Server{Addr: *addr, Handler: api.Handler(q, api.Options{Files: files}), ReadHeaderTimeout: 10 * time.Second}
+	mux := http.NewServeMux()
+	mux.Handle("/", api.Handler(q, api.Options{Files: files}))
+	// A clean shutdown for a laneq running without a console (no Ctrl+C to send):
+	// stop the worker, stop serving, write a final snapshot, exit 0.
+	mux.HandleFunc("POST /v1/admin/shutdown", func(w http.ResponseWriter, r *http.Request) {
+		if host, _, _ := net.SplitHostPort(r.RemoteAddr); !net.ParseIP(host).IsLoopback() {
+			http.Error(w, "shutdown is only accepted from this machine", http.StatusForbidden)
+			return
+		}
+		log.Printf("shutdown requested")
+		w.WriteHeader(http.StatusAccepted)
+		stop()
+	})
+	srv := &http.Server{Addr: *addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	ln, err := listen(*addr)
 	if err != nil {
 		// Most likely another laneq is already running; one per data dir is enough.
@@ -105,10 +119,12 @@ func main() {
 	if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
-	<-done
+	<-done // the worker has exited
 	if err := q.Close(); err != nil {
 		log.Printf("close: %v", err)
+		os.Exit(1)
 	}
+	log.Printf("laneq stopped cleanly")
 }
 
 func every(ctx context.Context, d time.Duration, fn func()) {

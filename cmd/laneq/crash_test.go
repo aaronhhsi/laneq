@@ -36,14 +36,9 @@ func TestCrashLosesNothingAcknowledged(t *testing.T) {
 	const rounds = 5
 	for round := range rounds {
 		addr := freeAddr(t)
-		srv := exec.Command(bin, "-addr", addr, "-data", data)
-		var stderr bytes.Buffer
-		srv.Stderr = &stderr
-		if err := srv.Start(); err != nil {
-			t.Fatal(err)
-		}
+		srv, stderr := startServer(t, bin, "-addr", addr, "-data", data)
 		base := "http://" + addr
-		waitUp(t, base, &stderr)
+		waitUp(t, base, stderr)
 
 		var stop atomic.Bool
 		var wg sync.WaitGroup
@@ -105,15 +100,9 @@ func TestCrashLosesNothingAcknowledged(t *testing.T) {
 
 	// Restart once more and audit everything acknowledged across all rounds.
 	addr := freeAddr(t)
-	srv := exec.Command(bin, "-addr", addr, "-data", data)
-	var stderr bytes.Buffer
-	srv.Stderr = &stderr
-	if err := srv.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { srv.Process.Kill(); srv.Wait() }()
+	_, stderr := startServer(t, bin, "-addr", addr, "-data", data)
 	base := "http://" + addr
-	waitUp(t, base, &stderr)
+	waitUp(t, base, stderr)
 
 	var jobs []struct {
 		ID    int64
@@ -165,6 +154,24 @@ func post(url string, body any, out any) int {
 		return 0
 	}
 	return resp.StatusCode
+}
+
+// startServer starts a laneq process that is killed when the test ends, however
+// it ends: a test that fails mid-way must not leave a server running (an early
+// version did, and seven of them sat on ports for hours).
+func startServer(t *testing.T, bin string, args ...string) (*exec.Cmd, *bytes.Buffer) {
+	t.Helper()
+	srv := exec.Command(bin, args...)
+	var stderr bytes.Buffer
+	srv.Stderr = &stderr
+	if err := srv.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		srv.Process.Kill() // an error just means it already exited
+		srv.Wait()
+	})
+	return srv, &stderr
 }
 
 func freeAddr(t *testing.T) string {
