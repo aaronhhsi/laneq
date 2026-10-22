@@ -22,7 +22,19 @@
   header { display: flex; align-items: center; gap: 12px; padding: 14px 24px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 5; }
   header h1 { font-size: 16px; margin: 0; letter-spacing: .02em; }
   header .grow { flex: 1; }
-  main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 60px; display: grid; gap: 20px; }
+  main { max-width: 1440px; margin: 0 auto; padding: 20px 16px 60px; display: grid; gap: 20px; }
+  .layout { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 20px; align-items: start; }
+  .layout > div { display: grid; gap: 20px; min-width: 0; }
+  .side { position: sticky; top: 72px; max-height: calc(100vh - 92px); overflow-y: auto; }
+  h2 .grow { flex: 1; }
+  /* the sidebar is narrow: put an item's status and buttons under its text */
+  .side .item { grid-template-columns: 56px minmax(0, 1fr); }
+  .side .item > .row { grid-column: 2; }
+  button.toggle[aria-pressed="true"] { background: var(--chip); border-color: var(--muted); }
+  @media (max-width: 980px) {
+    .layout { grid-template-columns: 1fr; }
+    .side { position: static; max-height: none; order: -1; }
+  }
   section.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); padding: 16px 18px; }
   h2 { font-size: 15px; margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
   h3 { font-size: 13px; margin: 18px 0 8px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
@@ -173,6 +185,12 @@ function saveSettings(lane) {
   act(() => api("PUT", `/v1/schedules/${encodeURIComponent(lane)}`, { ...s, at, count }));
 }
 function toggleSettings(lane) { state.settingsOpen[lane] = !state.settingsOpen[lane]; render(); }
+function toggleBackground() {
+  state.showBackground = !state.showBackground;
+  try { localStorage.setItem("laneq.showBackground", state.showBackground ? "1" : ""); } catch {}
+  render();
+}
+try { state.showBackground = !!localStorage.getItem("laneq.showBackground"); } catch {}
 function moreUpcoming(lane) { state.upcoming[lane] = (state.upcoming[lane] || UPCOMING_PAGE) + UPCOMING_PAGE; refresh(); }
 
 // --- data ---
@@ -307,13 +325,21 @@ function render() {
   const app = $("#app");
   if (!state.loaded) { app.innerHTML = `<div class="empty">Loading…</div>`; return; }
   const open = viewer.open;
-  // "Posting now" is what's running or due within the hour; jobs queued further out
-  // (e.g. monthly token refreshes) are listed separately so they don't crowd it.
-  const soon = Date.now() + 3600e3;
-  const running = state.active.filter(j => j.state === "running");
-  const waiting = state.active.filter(j => j.state === "queued" && (new Date(j.run_at) <= soon || j.last_error));
-  const later = state.active.filter(j => j.state === "queued" && !waiting.includes(j))
+  // Jobs with a preview are posts; the rest (e.g. monthly token refreshes) are
+  // background jobs, hidden from "Posting now" unless toggled on.
+  const isPost = j => !!(j.payload && j.payload.preview);
+  const background = state.active.filter(j => !isPost(j)).sort((a, b) => new Date(a.run_at) - new Date(b.run_at));
+  const shown = state.showBackground ? state.active : state.active.filter(isPost);
+  const soon = Date.now() + 3600e3; // posts released for later tonight stay out of the way until close
+  const running = shown.filter(j => j.state === "running");
+  const waiting = shown.filter(j => j.state === "queued" && (!isPost(j) || new Date(j.run_at) <= soon || j.last_error))
     .sort((a, b) => new Date(a.run_at) - new Date(b.run_at));
+  const queueItem = j => item(j,
+    `<span class="chip${j.last_error ? " warn" : ""}">${j.last_error ? "retrying" : isPost(j) ? "up next" : "scheduled"} ${esc(fmtIn(new Date(j.run_at) - Date.now()))}</span>`
+      + (j.lane ? ` <button onclick="hold(${j.id})" title="Put it back in line for a later run">Hold back</button>` : ""),
+    (isPost(j) ? "" : ` · ${esc(fmtWhen(j.run_at))}`) + (j.attempts ? ` · ${j.attempts} attempts so far` : ""));
+  const posted = state.history.filter(isPost);
+
   app.innerHTML = `
     ${state.error ? `<div class="banner">${esc(state.error)}</div>` : ""}
     ${state.dead.length ? `<section class="panel">
@@ -321,27 +347,30 @@ function render() {
       <p class="muted" style="margin-top:-6px">These failed and won't be retried on their own. Everything after them in the same lane waits, so posts never go up out of order.</p>
       <div class="list">${state.dead.map(j => item(j, `<button class="primary" onclick="retry(${j.id})">Retry</button><button class="danger" onclick="skip(${j.id})">Skip</button>`, ` · ${j.attempts} attempts`)).join("")}</div>
     </section>` : ""}
-    ${running.length || waiting.length ? `<section class="panel">
-      <h2>Posting now</h2>
-      <div class="list">
-        ${running.map(j => item(j, `<span class="chip ok">running</span>`, ` · attempt ${j.attempts} on ${esc(j.worker)}`)).join("")}
-        ${waiting.map(j => item(j, `<span class="chip${j.last_error ? " warn" : ""}">${j.last_error ? "retrying" : "up next"} ${esc(fmtIn(new Date(j.run_at) - Date.now()))}</span>`
-            + (j.lane ? ` <button onclick="hold(${j.id})" title="Put it back in line for a later run">Hold back</button>` : ""),
-            j.attempts ? ` · ${j.attempts} attempts so far` : "")).join("")}
+    <div class="layout">
+      <div>
+        ${state.schedules.length ? state.schedules.map(lanePanel).join("") : `<section class="panel"><div class="empty">No schedules yet. Create one with PUT /v1/schedules/{lane}.</div></section>`}
       </div>
-    </section>` : ""}
-    ${state.schedules.length ? state.schedules.map(lanePanel).join("") : `<section class="panel"><div class="empty">No schedules yet. Create one with PUT /v1/schedules/{lane}.</div></section>`}
-    ${later.length ? `<section class="panel">
-      <h2>Other scheduled jobs <span class="chip">${later.length}</span></h2>
-      <p class="muted" style="margin:-6px 0 0">Next: ${esc(later[0].type)} ${esc(later[0].payload && later[0].payload.member || "")}
-        on ${esc(fmtWhen(later[0].run_at))}${later.length > 1 ? `, then ${later.length - 1} more through ${esc(fmtNight(new Date(later[later.length - 1].run_at)))}` : ""}.</p>
-    </section>` : ""}
-    <section class="panel">
-      <h2>Recently posted</h2>
-      ${state.history.length ? `<div class="list">${state.history.filter(j => j.type !== "refresh_token").map(j => item(j,
-          j.result && j.result.permalink ? `<a href="${esc(j.result.permalink)}" target="_blank" rel="noopener">Open ↗</a>` : `<span class="chip">${esc((j.result && j.result.mode) || "done")}</span>`,
-          ` · ${esc(fmtWhen(j.finished_at))}`)).join("")}</div>` : `<div class="empty">Nothing yet.</div>`}
-    </section>`;
+      <div class="side">
+        <section class="panel">
+          <h2>Posting now
+            <span class="grow"></span>
+            ${background.length ? `<button class="toggle" aria-pressed="${!!state.showBackground}" onclick="toggleBackground()"
+                title="Jobs that aren't posts, like token refreshes">${state.showBackground ? "Hide" : "Show"} background jobs (${background.length})</button>` : ""}
+          </h2>
+          ${running.length || waiting.length ? `<div class="list">
+            ${running.map(j => item(j, `<span class="chip ok">running</span>`, ` · attempt ${j.attempts} on ${esc(j.worker)}`)).join("")}
+            ${waiting.map(queueItem).join("")}
+          </div>` : `<div class="empty">Nothing posting right now.</div>`}
+        </section>
+        <section class="panel">
+          <h2>Recently posted</h2>
+          ${posted.length ? `<div class="list">${posted.map(j => item(j,
+              j.result && j.result.permalink ? `<a href="${esc(j.result.permalink)}" target="_blank" rel="noopener">Open ↗</a>` : `<span class="chip">${esc((j.result && j.result.mode) || "done")}</span>`,
+              ` · ${esc(fmtWhen(j.finished_at))}`)).join("")}</div>` : `<div class="empty">Nothing yet.</div>`}
+        </section>
+      </div>
+    </div>`;
   if (open && !viewer.open) viewer.showModal();
 }
 
