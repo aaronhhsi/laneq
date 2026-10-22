@@ -21,6 +21,11 @@ type Schedule struct {
 	GapSeconds int    `json:"gap_seconds"`  // spacing between the released jobs' run_at
 	MaxCatchUp int    `json:"max_catch_up"` // most missed days made up at once
 
+	// EnabledBeforePause remembers Enabled while the lane is paused: pausing
+	// switches the schedule off, and resuming restores exactly this. Changing
+	// the schedule while paused updates this instead of Enabled.
+	EnabledBeforePause bool `json:"enabled_before_pause,omitempty"`
+
 	// LastRun is the most recent slot (not wall-clock time) that has been released.
 	LastRun time.Time `json:"last_run"`
 	// Overrides sets a different count for one day's run, keyed by the slot's date ("2026-10-23").
@@ -112,6 +117,11 @@ func (q *Queue) SetSchedule(s Schedule) (_ ScheduleStatus, err error) {
 		// New, re-timed, or switched back on: start from now. Days a schedule
 		// was off aren't missed runs, so they're never caught up.
 		s.LastRun = s.prevSlot(now)
+	}
+	s.EnabledBeforePause = false
+	if l := q.lanes[s.Lane]; l != nil && l.state.Paused {
+		// The lane is stopped: remember what was asked for, apply it on resume.
+		s.EnabledBeforePause, s.Enabled = s.Enabled, false
 	}
 	s = cloneSchedule(s)
 	if err := q.commit(record{Schedule: &s}); err != nil {

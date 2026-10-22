@@ -203,6 +203,74 @@ func TestPauseIsAFullStop(t *testing.T) {
 	}
 }
 
+func TestPauseSwitchesTheScheduleOffAndRestoresIt(t *testing.T) {
+	q, c, _ := newNightly(t, 20)
+	q.SetPaused("photos", true)
+	if s := q.Schedules()[0]; s.Enabled || !s.EnabledBeforePause {
+		t.Fatalf("paused: enabled %v, remembered %v; want off, remembering on", s.Enabled, s.EnabledBeforePause)
+	}
+	q.SetPaused("photos", true) // pausing twice must not overwrite the memory with "off"
+	if s := q.Schedules()[0]; !s.EnabledBeforePause {
+		t.Fatal("second pause forgot the schedule was on")
+	}
+
+	// Settings saved while stopped are remembered, not applied.
+	s := q.Schedules()[0].Schedule
+	s.Enabled, s.Count = true, 1
+	q.SetSchedule(s)
+	if s := q.Schedules()[0]; s.Enabled || !s.EnabledBeforePause || s.Count != 1 {
+		t.Fatalf("saved while paused: %+v", s.Schedule)
+	}
+
+	q.SetPaused("photos", false)
+	if s := q.Schedules()[0]; !s.Enabled || s.EnabledBeforePause {
+		t.Fatalf("resumed: enabled %v, remembered %v; want on, cleared", s.Enabled, s.EnabledBeforePause)
+	}
+	c.Add(time.Hour)
+	if got := runSchedules(t, q); len(got) != 1 {
+		t.Fatalf("first night after resume released %d, want the count saved while paused (1)", len(got))
+	}
+}
+
+func TestPauseKeepsAnOffScheduleOff(t *testing.T) {
+	q, c, _ := newNightly(t, 20)
+	s := q.Schedules()[0].Schedule
+	s.Enabled = false
+	q.SetSchedule(s)
+	q.SetPaused("photos", true)
+	q.SetPaused("photos", false)
+	if s := q.Schedules()[0]; s.Enabled {
+		t.Fatal("resuming switched on a schedule that was off before the pause")
+	}
+	c.Add(time.Hour)
+	if got := runSchedules(t, q); len(got) != 0 {
+		t.Fatalf("released %d from a schedule that should be off", len(got))
+	}
+}
+
+func TestNothingCanBeReleasedOrRetriedIntoAPausedLane(t *testing.T) {
+	q, c, _ := newNightly(t, 5)
+	c.Add(time.Hour)
+	runSchedules(t, q)
+	l := mustClaimID(t, q, 1)
+	q.Fail(l.Job.ID, l.Token, FailRequest{Error: "boom", Permanent: true})
+	q.SetPaused("photos", true)
+
+	if _, err := q.Release("photos", 1, time.Time{}); err == nil {
+		t.Fatal("released into a paused lane")
+	}
+	j, err := q.Retry(1)
+	if err != nil || j.State != Held {
+		t.Fatalf("retry while paused: %s, %v; want held", j.State, err)
+	}
+	q.SetPaused("photos", false)
+	mustClaimNone(t, q) // the retried job waits for the next run, like everything else
+	c.Add(24 * time.Hour)
+	if got := runSchedules(t, q); len(got) == 0 || got[0].ID != 1 {
+		t.Fatalf("next run after resume: %+v, want the retried job first", got)
+	}
+}
+
 func TestPauseSurvivesRestart(t *testing.T) {
 	q, c, dir := newNightly(t, 10)
 	q.SetPaused("photos", true)

@@ -380,7 +380,9 @@ func (q *Queue) Enqueue(req EnqueueRequest) (job Job, created bool, err error) {
 	return *q.jobs[j.ID], true, nil
 }
 
-// Release queues the first n held jobs of a lane (in lane order) to run at runAt.
+// Release queues the first n held jobs of a lane (in lane order) to run at
+// runAt. A paused lane refuses: released jobs would sit waiting to run the
+// moment it resumes, which is exactly what pausing promises won't happen.
 func (q *Queue) Release(laneName string, n int, runAt time.Time) (out []Job, err error) {
 	q.mu.Lock()
 	defer q.done(&err)
@@ -390,6 +392,9 @@ func (q *Queue) Release(laneName string, n int, runAt time.Time) (out []Job, err
 	l := q.lanes[laneName]
 	if l == nil {
 		return nil, nil
+	}
+	if l.state.Paused {
+		return nil, fmt.Errorf("%w: lane %q is paused; resume it first", ErrBadState, laneName)
 	}
 	for _, id := range slices.Clone(l.active) {
 		if len(out) == n {
@@ -676,7 +681,9 @@ func (q *Queue) expireLocked(now time.Time) error {
 // --- operators --------------------------------------------------------------
 
 // Retry runs a dead job again with fresh attempts, or runs a job waiting on
-// backoff right away.
+// backoff right away. In a paused lane with a schedule, the job goes back to
+// held instead (first in line for the next release after resuming), so a
+// retry while stopped can't make anything run the moment the lane resumes.
 func (q *Queue) Retry(id int64) (_ Job, err error) {
 	q.mu.Lock()
 	defer q.done(&err)
@@ -692,6 +699,9 @@ func (q *Queue) Retry(id int64) (_ Job, err error) {
 		return Job{}, fmt.Errorf("%w: can't retry a %s job", ErrBadState, j.State)
 	}
 	j.State, j.RunAt = Queued, q.opts.Now()
+	if _, scheduled := q.schedules[j.Lane]; scheduled && q.lane(j.Lane).state.Paused {
+		j.State = Held
+	}
 	if err := q.put(j); err != nil {
 		return Job{}, err
 	}
@@ -773,33 +783,44 @@ func (q *Queue) Move(id int64, delta int) (_ Job, err error) {
 // SetPaused stops or resumes a lane. Pausing is a full stop: the running job
 // finishes (stopping it mid-way could leave its side effect half done), nothing
 // new starts, and if the lane has a schedule:
+//   - the schedule is switched off, and its previous setting remembered;
 //   - jobs released but not started go back to held, at the front of the line,
-//     so resuming doesn't immediately run them;
-//   - the schedule releases nothing while paused, and on resume the paused days
-//     are skipped rather than made up, so nothing builds up.
+//     so resuming doesn't immediately run them.
 //
-// Everything is one log append, so a crash can't leave a half-applied pause.
+// Resuming restores the schedule as it was, and marks the paused days as run:
+// they're skipped rather than made up, so nothing builds up. While paused,
+// Release is refused and Retry returns a job to held (see those).
+//
+// Pausing a paused lane (or resuming a running one) changes nothing. Everything
+// is one log append, so a crash can't leave a half-applied pause.
 func (q *Queue) SetPaused(laneName string, paused bool) (_ LaneState, err error) {
 	q.mu.Lock()
 	defer q.done(&err)
 	l := q.lane(laneName)
+	if l.state.Paused == paused {
+		return l.state, nil // already so; above all, don't overwrite EnabledBeforePause
+	}
 	ls := l.state
 	ls.Paused = paused
 	recs := []record{{Lane: &ls}}
 	if sched, ok := q.schedules[laneName]; ok {
 		now := q.opts.Now()
+		s := cloneSchedule(sched)
 		if paused {
+			s.EnabledBeforePause, s.Enabled = s.Enabled, false
 			for _, id := range l.active {
 				if j := *q.jobs[id]; j.State == Queued {
 					j.State, j.UpdatedAt = Held, now
 					recs = append(recs, record{Job: &j})
 				}
 			}
-		} else if last := sched.prevSlot(now); last.After(sched.LastRun) {
-			s := cloneSchedule(sched)
-			s.LastRun = last // the days it was paused count as run: skipped, not owed
-			recs = append(recs, record{Schedule: &s})
+		} else {
+			s.Enabled, s.EnabledBeforePause = s.EnabledBeforePause, false
+			if last := s.prevSlot(now); last.After(s.LastRun) {
+				s.LastRun = last // the days it was paused count as run: skipped, not owed
+			}
 		}
+		recs = append(recs, record{Schedule: &s})
 	}
 	if err := q.commit(recs...); err != nil {
 		return LaneState{}, err

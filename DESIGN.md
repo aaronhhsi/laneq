@@ -283,14 +283,27 @@ append makes them atomic. Test:
 `TestScheduleNeverReleasesTheSameNightTwiceAcrossRestart`.
 
 **Why pausing is a full stop.** Pausing a scheduled lane must mean "nothing
-more happens" to whoever presses it, so in one log append it: lets the running
-job finish (stopping it mid-way could leave a side effect half done), returns
-released-but-not-started jobs to held at the front of the line, and makes the
-schedule release nothing while paused. On resume the paused days are marked as
-run, so they're skipped rather than made up: resuming never causes a burst. The
-first version only stopped claims while the schedule kept releasing, so a
-week's pause meant a week of posts back to back on resume. Tests:
-`TestPauseIsAFullStop`, `TestPauseSurvivesRestart`.
+more happens" to whoever presses it, with no loose ends. In one log append it:
+- lets the running job finish (stopping it mid-way could leave a side effect
+  half done);
+- switches the schedule off, remembering whether it was on
+  (`EnabledBeforePause`), and resuming restores exactly that, so a schedule
+  that was off before the pause stays off after it;
+- returns released-but-not-started jobs to held, at the front of the line.
+
+While paused, `Release` is refused, `Retry` puts the job back to held instead
+of queued, and saving the schedule updates the remembered setting rather than
+switching it back on. Pausing twice changes nothing (it mustn't overwrite the
+memory with "off"). On resume the paused days are marked as run, so they're
+skipped rather than made up: resuming never causes a burst. `RunSchedules` also
+skips paused lanes, as a second guard.
+
+The first version only stopped claims while the schedule kept releasing, so a
+week's pause meant a week of posts back to back on resume. The second switched
+nothing off, so a `Retry` or `Release` during the pause could still leave
+something to run on resume. Tests: `TestPauseIsAFullStop`,
+`TestPauseSwitchesTheScheduleOffAndRestoresIt`, `TestPauseKeepsAnOffScheduleOff`,
+`TestNothingCanBeReleasedOrRetriedIntoAPausedLane`, `TestPauseSurvivesRestart`.
 
 **Other rules, each with a test:** a new schedule never fires immediately; a
 schedule switched off and on again doesn't "catch up" the days it was off
