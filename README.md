@@ -96,6 +96,8 @@ go run ./cmd/laneq-bench -jobs 50000 -producers 32 -workers 32
 
 The API listens on localhost by default and has no authentication.
 
+Why it is built this way, decision by decision: [DESIGN.md](DESIGN.md).
+
 ## HTTP API
 
 | | |
