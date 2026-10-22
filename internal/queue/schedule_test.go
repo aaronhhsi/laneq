@@ -167,6 +167,54 @@ func TestReenabledScheduleDoesNotCatchUpDaysItWasOff(t *testing.T) {
 	}
 }
 
+func TestPauseIsAFullStop(t *testing.T) {
+	q, c, _ := newNightly(t, 20)
+	c.Add(time.Hour) // midnight: 3 released
+	runSchedules(t, q)
+	running := mustClaimID(t, q, 1)
+
+	if _, err := q.SetPaused("photos", true); err != nil {
+		t.Fatal(err)
+	}
+	// The running job finishes; the two released-but-not-started go back in line.
+	if _, err := q.Complete(running.Job.ID, running.Token, nil); err != nil {
+		t.Fatalf("running job should be allowed to finish: %v", err)
+	}
+	for _, id := range []int64{2, 3} {
+		if j, _ := q.Get(id); j.State != Held {
+			t.Fatalf("job %d is %s after pause, want held", id, j.State)
+		}
+	}
+
+	c.Add(3 * 24 * time.Hour) // three nights pass while stopped
+	if got := runSchedules(t, q); len(got) != 0 {
+		t.Fatalf("paused lane released %d", len(got))
+	}
+	q.SetPaused("photos", false)
+	if got := runSchedules(t, q); len(got) != 0 {
+		t.Fatalf("resuming released %d: paused nights must not build up", len(got))
+	}
+	mustClaimNone(t, q) // and nothing posts the moment it resumes
+
+	c.Add(24 * time.Hour) // the next night is normal, starting with the held-back jobs
+	got := runSchedules(t, q)
+	if len(got) != 3 || got[0].ID != 2 || got[1].ID != 3 || got[2].ID != 4 {
+		t.Fatalf("first night after resume released %+v, want jobs 2, 3, 4", got)
+	}
+}
+
+func TestPauseSurvivesRestart(t *testing.T) {
+	q, c, dir := newNightly(t, 10)
+	q.SetPaused("photos", true)
+	q.wal.close()
+	q = open(t, dir, c)
+	defer q.Close()
+	c.Add(time.Hour)
+	if got := runSchedules(t, q); len(got) != 0 {
+		t.Fatalf("pause was lost across a restart: released %d", len(got))
+	}
+}
+
 func TestHoldUndoesRelease(t *testing.T) {
 	q, _, _ := newQueue(t)
 	a := enqueue(t, q, EnqueueRequest{Type: "x", Lane: "l", Hold: true})

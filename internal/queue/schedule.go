@@ -195,6 +195,9 @@ func (q *Queue) RunSchedules() (released []Job, err error) {
 		if !cur.Enabled {
 			continue
 		}
+		if l := q.lanes[cur.Lane]; l != nil && l.state.Paused {
+			continue // stopped: release nothing; resuming skips these days (SetPaused)
+		}
 		var due []time.Time
 		for slot := cur.nextSlot(cur.LastRun.In(now.Location())); !slot.After(now); slot = cur.nextSlot(slot) {
 			due = append(due, slot)

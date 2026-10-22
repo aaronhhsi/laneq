@@ -770,14 +770,38 @@ func (q *Queue) Move(id int64, delta int) (_ Job, err error) {
 	return q.jobs[id].Public(), nil
 }
 
-// SetPaused pauses or resumes a lane. A paused lane's running job finishes,
-// but nothing new starts.
+// SetPaused stops or resumes a lane. Pausing is a full stop: the running job
+// finishes (stopping it mid-way could leave its side effect half done), nothing
+// new starts, and if the lane has a schedule:
+//   - jobs released but not started go back to held, at the front of the line,
+//     so resuming doesn't immediately run them;
+//   - the schedule releases nothing while paused, and on resume the paused days
+//     are skipped rather than made up, so nothing builds up.
+//
+// Everything is one log append, so a crash can't leave a half-applied pause.
 func (q *Queue) SetPaused(laneName string, paused bool) (_ LaneState, err error) {
 	q.mu.Lock()
 	defer q.done(&err)
-	ls := q.lane(laneName).state
+	l := q.lane(laneName)
+	ls := l.state
 	ls.Paused = paused
-	if err := q.commit(record{Lane: &ls}); err != nil {
+	recs := []record{{Lane: &ls}}
+	if sched, ok := q.schedules[laneName]; ok {
+		now := q.opts.Now()
+		if paused {
+			for _, id := range l.active {
+				if j := *q.jobs[id]; j.State == Queued {
+					j.State, j.UpdatedAt = Held, now
+					recs = append(recs, record{Job: &j})
+				}
+			}
+		} else if last := sched.prevSlot(now); last.After(sched.LastRun) {
+			s := cloneSchedule(sched)
+			s.LastRun = last // the days it was paused count as run: skipped, not owed
+			recs = append(recs, record{Schedule: &s})
+		}
+	}
+	if err := q.commit(recs...); err != nil {
 		return LaneState{}, err
 	}
 	return ls, nil

@@ -173,7 +173,11 @@ const skip = id => act(() => api("POST", `/v1/jobs/${id}/cancel`), "Skip this po
 const retry = id => act(() => api("POST", `/v1/jobs/${id}/retry`));
 const hold = id => act(() => api("POST", `/v1/jobs/${id}/hold`));
 const setTonight = (lane, day, count) => act(() => api("POST", `/v1/schedules/${encodeURIComponent(lane)}/override`, { day, count }));
-const pause = (lane, paused) => act(() => api("POST", `/v1/lanes/${encodeURIComponent(lane)}/${paused ? "pause" : "resume"}`));
+const pause = (lane, paused) => act(() => api("POST", `/v1/lanes/${encodeURIComponent(lane)}/${paused ? "pause" : "resume"}`),
+  paused ? "Stop posting?\n\nA post that's going up right now finishes, then nothing else posts. "
+         + "Nightly runs are skipped while stopped, and nothing piles up: resuming starts again at the next run, "
+         + "with the posts that were waiting still first in line."
+         : "");
 function postNow(lane) {
   const n = Math.max(1, Math.min(25, +$(`#now-${CSS.escape(lane)}`).value || 1));
   act(() => api("POST", `/v1/lanes/${encodeURIComponent(lane)}/release`, { n }),
@@ -271,16 +275,18 @@ function lanePanel(s) {
   const L = esc(JSON.stringify(s.lane));
   return `<section class="panel">
     <h2>${esc(s.lane)}
-      ${lane.paused ? `<span class="chip warn">paused</span>` : s.enabled ? `<span class="chip ok">scheduled</span>` : `<span class="chip">schedule off</span>`}
+      ${lane.paused ? `<span class="chip warn">stopped</span>` : s.enabled ? `<span class="chip ok">scheduled</span>` : `<span class="chip">schedule off</span>`}
       ${blocked ? `<span class="chip bad">blocked: needs attention</span>` : ""}
       <span class="grow" style="flex:1"></span>
-      <button onclick='pause(${L}, ${!lane.paused})'>${lane.paused ? "Resume" : "Pause"}</button>
+      <button class="${lane.paused ? "primary" : "danger"}" onclick='pause(${L}, ${!lane.paused})'>${lane.paused ? "Resume posting" : "Stop posting"}</button>
       <button onclick='toggleSettings(${L})'>Settings</button>
     </h2>
     <div class="next">
       <div>
         <div class="muted">Next run</div>
-        <div class="when">${esc(fmtNight(next))}, ${esc(fmtTime(next))} <span class="muted" style="font-size:14px;font-weight:400">${esc(fmtIn(next - Date.now()))}</span></div>
+        ${lane.paused ? `<div class="when">Stopped</div>
+        <div class="muted">Nothing posts until you resume. Nights while stopped are skipped, not made up.</div>`
+        : `<div class="when">${esc(fmtNight(next))}, ${esc(fmtTime(next))} <span class="muted" style="font-size:14px;font-weight:400">${esc(fmtIn(next - Date.now()))}</span></div>`}
         <div class="muted">${s.held} posts waiting · about ${leftNights} nights at ${s.count} a night</div>
       </div>
       <div>
@@ -298,8 +304,8 @@ function lanePanel(s) {
         <span class="muted">Don't wait for the schedule:</span>
         <input type="number" id="now-${esc(s.lane)}" min="1" max="25" value="${state.nowCount[s.lane] || 1}" style="width:60px"
                oninput="state.nowCount[${esc(JSON.stringify(s.lane))}] = +this.value">
-        <button class="primary" onclick='postNow(${L})' ${held.length ? "" : "disabled"}>Post now</button>
-        <span class="muted">takes the next posts in line; tonight's run still posts its ${s.next_count}</span>
+        <button class="primary" onclick='postNow(${L})' ${held.length && !lane.paused ? "" : "disabled"}>Post now</button>
+        <span class="muted">${lane.paused ? "posting is stopped; resume to post" : `takes the next posts in line; tonight's run still posts its ${s.next_count}`}</span>
       </div>
     </div>
     <div class="settings ${state.settingsOpen[s.lane] ? "open" : ""}">

@@ -45,7 +45,9 @@ flowchart LR
 - Delayed jobs (`run_at`), held jobs released in batches, and daily schedules
   per lane ("release 3 at 00:00") that catch up on runs missed while the
   machine was asleep — without ever releasing the same day twice
-- Long-polling claims, lane pause/resume, a built-in dashboard
+- Pausing a lane is a full stop: the running job finishes, released jobs go back
+  in line, and paused days are skipped rather than made up
+- Long-polling claims and a built-in dashboard
 - Optional worker supervision: `laneq -- python worker.py` restarts the worker
   if it crashes, and (on Windows, via a job object) never leaves it orphaned
 
