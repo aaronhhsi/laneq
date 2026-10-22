@@ -83,7 +83,20 @@ func TestCrashLosesNothingAcknowledged(t *testing.T) {
 			}()
 		}
 
-		time.Sleep(time.Duration(300+round*150) * time.Millisecond)
+		// Kill once this round has seen real traffic (slow CI disks fsync far more
+		// slowly than a laptop SSD), at a varying point so kills land mid-operation.
+		mu.Lock()
+		e0, c0 := len(enqueued), len(completed)
+		mu.Unlock()
+		minWait := time.Duration(300+round*150) * time.Millisecond
+		for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+			mu.Lock()
+			enough := len(enqueued)-e0 >= 100 && len(completed)-c0 >= 5
+			mu.Unlock()
+			if enough && time.Since(deadline.Add(-30*time.Second)) >= minWait {
+				break
+			}
+		}
 		srv.Process.Kill() // mid-traffic, no clean shutdown
 		srv.Wait()
 		stop.Store(true)
