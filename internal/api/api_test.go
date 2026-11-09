@@ -135,3 +135,59 @@ func TestReleaseAndLanesOverHTTP(t *testing.T) {
 		t.Fatalf("enqueue without type: %d, want 400", code)
 	}
 }
+
+func TestClearLane(t *testing.T) {
+	srv := newServer(t)
+	for range 3 {
+		call(t, srv, "POST", "/v1/jobs", map[string]any{"type": "post", "lane": "photos", "hold": true}, nil)
+	}
+	call(t, srv, "POST", "/v1/jobs", map[string]any{"type": "post", "lane": "other"}, nil)
+	var out struct{ Canceled int }
+	if code := call(t, srv, "POST", "/v1/lanes/photos/clear", nil, &out); code != 200 || out.Canceled != 3 {
+		t.Fatalf("clear: %d, %+v; want 200, 3 canceled", code, out)
+	}
+	var left []json.RawMessage
+	call(t, srv, "GET", "/v1/jobs?state=queued,held", nil, &left)
+	if len(left) != 1 {
+		t.Fatalf("%d jobs left waiting; want only the other lane's", len(left))
+	}
+	if code := call(t, srv, "POST", "/v1/lanes/photos/clear", map[string]any{"states": []string{"running"}}, nil); code != 400 {
+		t.Errorf("clearing running jobs: %d; want 400", code)
+	}
+}
+
+func TestAppsOverHTTP(t *testing.T) {
+	srv := newServer(t)
+	var hb struct{ Stop bool }
+	call(t, srv, "POST", "/v1/apps/posts/heartbeat", map[string]any{"title": "Posts", "pid": 4242, "dashboard": "http://127.0.0.1:9/"}, &hb)
+	if hb.Stop {
+		t.Fatal("told to stop on first check-in")
+	}
+	if code := call(t, srv, "POST", "/v1/apps/posts/stop", nil, nil); code != 200 {
+		t.Fatalf("stop: %d", code)
+	}
+	call(t, srv, "POST", "/v1/apps/posts/heartbeat", map[string]any{"pid": 4242}, &hb)
+	if !hb.Stop {
+		t.Fatal("not told to stop")
+	}
+	var list []struct{ Name, Status, Title string }
+	call(t, srv, "GET", "/v1/apps", nil, &list)
+	if len(list) != 1 || list[0].Status != "stopping" {
+		t.Fatalf("apps = %+v", list)
+	}
+	if code := call(t, srv, "POST", "/v1/apps/nope/stop", nil, nil); code != 404 {
+		t.Errorf("stopping an unknown app: %d", code)
+	}
+
+	// A page on another site can't change anything; reading is fine.
+	req, _ := http.NewRequest("POST", srv.URL+"/v1/apps/posts/start", nil)
+	req.Header.Set("Origin", "https://evil.example")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("cross-site POST: %d; want 403", resp.StatusCode)
+	}
+}

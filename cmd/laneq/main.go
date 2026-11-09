@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -22,8 +21,19 @@ import (
 	"time"
 
 	"github.com/aaronhhsi/laneq/internal/api"
+	"github.com/aaronhhsi/laneq/internal/apps"
 	"github.com/aaronhhsi/laneq/internal/queue"
+	"github.com/aaronhhsi/laneq/internal/usage"
 )
+
+// version is set at build time (-ldflags "-X main.version=v1.2.0").
+var version = "dev"
+
+// statsURL receives the daily usage totals (see internal/usage and the README).
+const statsURL = "https://bpplyuckjuiuuyazcvzi.supabase.co/functions/v1/stats"
+
+// PowerOffWait is how long power off lets apps finish their current jobs.
+const PowerOffWait = 2 * time.Minute
 
 type mounts map[string]string
 
@@ -43,6 +53,7 @@ func main() {
 	logPath := flag.String("log", "", "append logs to this file instead of stderr")
 	files := mounts{}
 	flag.Var(files, "files", "serve a directory read-only at /files/<name>/ (name=dir; repeatable)")
+	usageStats := flag.Bool("usage-stats", true, "send a few totals (jobs, lanes, apps, data size) once a day; see the README")
 	flag.Parse()
 
 	var out io.Writer = os.Stderr
@@ -64,18 +75,48 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	registry := apps.New()
 	mux := http.NewServeMux()
-	mux.Handle("/", api.Handler(q, api.Options{Files: files}))
+	mux.Handle("/", api.Handler(q, api.Options{Files: files, Apps: registry}))
+	// Only from this machine, and not from a page on another site.
+	admin := func(r *http.Request) bool {
+		o := r.Header.Get("Origin")
+		return api.FromThisMachine(r) && (o == "" || o == "http://"+r.Host)
+	}
 	// A clean shutdown for a laneq running without a console (no Ctrl+C to send):
 	// stop the worker, stop serving, write a final snapshot, exit 0.
 	mux.HandleFunc("POST /v1/admin/shutdown", func(w http.ResponseWriter, r *http.Request) {
-		if host, _, _ := net.SplitHostPort(r.RemoteAddr); !net.ParseIP(host).IsLoopback() {
+		if !admin(r) {
 			http.Error(w, "shutdown is only accepted from this machine", http.StatusForbidden)
 			return
 		}
 		log.Printf("shutdown requested")
 		w.WriteHeader(http.StatusAccepted)
 		stop()
+	})
+	// Power off: stop every app (each finishes the job it's on), end any still
+	// running after PowerOffWait, then shut down. The kill switch for the whole thing.
+	mux.HandleFunc("POST /v1/admin/poweroff", func(w http.ResponseWriter, r *http.Request) {
+		if !admin(r) {
+			http.Error(w, "power off is only accepted from this machine", http.StatusForbidden)
+			return
+		}
+		log.Printf("power off requested: stopping %v", registry.Running())
+		registry.StopAll()
+		w.WriteHeader(http.StatusAccepted)
+		go func() {
+			deadline := time.Now().Add(PowerOffWait)
+			for len(registry.Running()) > 0 && time.Now().Before(deadline) {
+				time.Sleep(time.Second)
+			}
+			for _, name := range registry.Running() {
+				log.Printf("power off: %s didn't stop in %s; ending it", name, PowerOffWait)
+				if err := registry.KillApp(name); err != nil {
+					log.Printf("power off: %s: %v", name, err)
+				}
+			}
+			stop()
+		}()
 	})
 	srv := &http.Server{Addr: *addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	ln, err := listen(*addr)
@@ -115,7 +156,19 @@ func main() {
 		srv.Shutdown(shutdown)
 	}()
 
-	log.Printf("laneq listening on http://%s (data in %s)", *addr, *dir)
+	if *usageStats && os.Getenv("LANEQ_USAGE_STATS") != "off" && statsURL != "" {
+		if id, err := usage.InstallID(*dir); err != nil {
+			log.Printf("usage stats off: %v", err)
+		} else {
+			log.Printf("usage stats: sending daily totals (jobs, lanes, apps, data size; no names or payloads) to %s; turn off with -usage-stats=false", statsURL)
+			go usage.Run(ctx, statsURL, usage.Report{InstallID: id, Kind: "laneq", Version: version}, func() map[string]any {
+				s := q.Stats()
+				return map[string]any{"jobs": s.Jobs, "succeeded": s.ByState[queue.Succeeded], "attempts": s.Attempts,
+					"lanes": s.Lanes, "schedules": s.Schedules, "apps": len(registry.List()), "data_bytes": s.DataBytes}
+			}, log.Printf)
+		}
+	}
+	log.Printf("laneq %s listening on http://%s (data in %s)", version, *addr, *dir)
 	if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}

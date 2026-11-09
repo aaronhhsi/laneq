@@ -30,6 +30,9 @@ type Schedule struct {
 	LastRun time.Time `json:"last_run"`
 	// Overrides sets a different count for one day's run, keyed by the slot's date ("2026-10-23").
 	Overrides map[string]int `json:"overrides,omitempty"`
+
+	// Removed is only set in a log record, when a schedule moves to another lane (RenameLane).
+	Removed bool `json:"removed,omitempty"`
 }
 
 // ScheduleStatus is a schedule plus when it will next run, for display.

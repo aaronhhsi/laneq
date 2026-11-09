@@ -21,145 +21,86 @@
   body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
   header { display: flex; align-items: center; gap: 12px; padding: 14px 24px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 5; }
   header h1 { font-size: 16px; margin: 0; letter-spacing: .02em; }
-  header .grow { flex: 1; }
+  header .grow, h2 .grow, .row .grow { flex: 1; }
   main { max-width: 1440px; margin: 0 auto; padding: 20px 16px 60px; display: grid; gap: 20px; }
-  .layout { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 20px; align-items: start; }
-  .layout > div { display: grid; gap: 20px; min-width: 0; }
-  .side { position: sticky; top: 72px; max-height: calc(100vh - 92px); overflow-y: auto; }
-  h2 .grow { flex: 1; }
-  /* the sidebar is narrow: put an item's status and buttons under its text */
-  .side .item { grid-template-columns: 56px minmax(0, 1fr); }
-  .side .item > .row { grid-column: 2; }
-  button.toggle[aria-pressed="true"] { background: var(--chip); border-color: var(--muted); }
-  @media (max-width: 980px) {
-    .layout { grid-template-columns: 1fr; }
-    .side { position: static; max-height: none; order: -1; }
-  }
-  section.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); padding: 16px 18px; }
-  h2 { font-size: 15px; margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
-  h3 { font-size: 13px; margin: 18px 0 8px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+  section.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); padding: 16px 18px; min-width: 0; }
+  h2 { font-size: 15px; margin: 0 0 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .muted { color: var(--muted); }
-  .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .chip { background: var(--chip); border-radius: 999px; padding: 2px 9px; font-size: 12px; white-space: nowrap; }
   .chip.ok { color: var(--ok); } .chip.warn { color: var(--warn); } .chip.bad { color: var(--bad); }
-  button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 7px; padding: 5px 11px; cursor: pointer; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 7px; padding: 4px 10px; cursor: pointer; white-space: nowrap; }
   button:hover:not(:disabled) { border-color: var(--muted); }
   button:disabled { opacity: .4; cursor: default; }
   button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
   button.danger { color: var(--bad); }
-  button.icon { padding: 3px 8px; }
-  input[type=time], input[type=number] { font: inherit; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
-  .stepper { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-  .stepper button { border: 0; border-radius: 0; padding: 4px 12px; font-size: 16px; }
-  .stepper output { min-width: 34px; text-align: center; font-weight: 700; font-size: 16px; }
-  .next { display: grid; grid-template-columns: 1fr auto; gap: 6px 16px; align-items: center; }
-  .next .when { font-size: 22px; font-weight: 700; }
-  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
-  .card { border: 1px solid var(--line); border-radius: 9px; overflow: hidden; background: var(--bg); display: flex; flex-direction: column; }
-  .thumb { position: relative; aspect-ratio: 4 / 5; background: var(--chip); cursor: zoom-in; }
-  .thumb img, .thumb video { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .thumb .count { position: absolute; top: 8px; right: 8px; background: rgba(0,0,0,.65); color: #fff; border-radius: 6px; padding: 1px 7px; font-size: 12px; }
-  .thumb .kind { position: absolute; bottom: 8px; left: 8px; background: rgba(0,0,0,.65); color: #fff; border-radius: 6px; padding: 1px 7px; font-size: 12px; }
-  .thumb .order { position: absolute; top: 8px; left: 8px; background: var(--accent); color: var(--accent-ink); border-radius: 6px; padding: 1px 8px; font-weight: 700; font-size: 12px; }
-  .card .body { padding: 9px 10px; display: grid; gap: 6px; }
-  .card .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .card .actions { display: flex; gap: 6px; }
-  .card .actions .grow { flex: 1; }
-  .list { display: grid; gap: 6px; }
-  .item { display: grid; grid-template-columns: 56px 1fr auto; gap: 12px; align-items: center; padding: 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
-  .item .mini { width: 56px; height: 70px; border-radius: 5px; overflow: hidden; background: var(--chip); cursor: zoom-in; }
-  .item .mini img, .item .mini video { width: 100%; height: 100%; object-fit: cover; }
-  .item .meta { min-width: 0; }
-  .item .meta .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .err { color: var(--bad); font-size: 12px; white-space: pre-wrap; word-break: break-word; max-height: 4.5em; overflow: auto; }
-  .night { display: grid; grid-template-columns: 110px 1fr; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); align-items: start; }
-  .night .date { font-weight: 600; padding-top: 4px; }
-  .strip { display: flex; gap: 8px; flex-wrap: wrap; }
-  .strip .mini { width: 64px; height: 80px; border-radius: 6px; overflow: hidden; background: var(--chip); cursor: zoom-in; position: relative; }
-  .strip .mini img, .strip .mini video { width: 100%; height: 100%; object-fit: cover; }
-  .empty { color: var(--muted); padding: 8px 0; }
+  button.power { background: var(--bad); color: #fff; border-color: var(--bad); font-weight: 700; padding: 6px 14px; }
+  .group td { background: var(--bg); font-weight: 600; }
+  button.toggle[aria-pressed="true"] { background: var(--chip); border-color: var(--muted); font-weight: 600; }
+  input, select { font: inherit; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
+  .scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tr.job { cursor: pointer; }
+  tr.job:hover td { background: var(--bg); }
+  .key { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .err { color: var(--bad); font-size: 12px; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .counts { display: flex; gap: 6px; flex-wrap: wrap; }
+  .state-queued { color: var(--accent); } .state-running { color: var(--ok); } .state-dead { color: var(--bad); }
+  .state-held { color: var(--warn); } .state-canceled, .state-succeeded { color: var(--muted); }
   .banner { padding: 10px 14px; border-radius: 8px; background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); }
-  dialog { border: 0; border-radius: 12px; padding: 0; max-width: min(960px, 96vw); width: 100%; background: var(--panel); color: var(--ink); }
+  .empty { color: var(--muted); padding: 8px 0; }
+  a { color: var(--accent); }
+  dialog { border: 0; border-radius: 12px; padding: 0; max-width: min(900px, 96vw); width: 100%; background: var(--panel); color: var(--ink); }
   dialog::backdrop { background: rgba(0,0,0,.6); }
   dialog .top { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
-  dialog .top .grow { flex: 1; }
-  dialog .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; padding: 14px; max-height: 70vh; overflow: auto; }
-  dialog .gallery img, dialog .gallery video { width: 100%; border-radius: 6px; display: block; }
-  dialog pre { margin: 0 14px 14px; padding: 10px; background: var(--bg); border-radius: 8px; white-space: pre-wrap; font: 13px/1.4 ui-monospace, Consolas, monospace; }
-  .settings { display: none; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); }
-  .settings.open { display: flex; }
-  a { color: var(--accent); }
-  @media (max-width: 640px) {
-    header { padding: 12px 16px; }
-    .next { grid-template-columns: 1fr; }
-    .night { grid-template-columns: 1fr; }
-  }
+  dialog pre { margin: 14px; padding: 10px; background: var(--bg); border-radius: 8px; white-space: pre-wrap; word-break: break-word; font: 12px/1.45 ui-monospace, Consolas, monospace; max-height: 70vh; overflow: auto; }
+  @media (max-width: 640px) { header { padding: 12px 16px; } }
 </style>
 </head>
 <body>
 <header>
   <h1>laneq</h1>
+  <span class="muted" id="where"></span>
   <span class="grow"></span>
   <span id="conn" class="chip">connecting…</span>
+  <button class="power" onclick="powerOff()" title="Stop every app, then laneq itself">⏻ Power off</button>
 </header>
 <main id="app"></main>
 
-<dialog id="viewer">
-  <div class="top"><strong id="v-title"></strong><span class="grow"></span><button onclick="viewer.close()">Close</button></div>
-  <div class="gallery" id="v-gallery"></div>
-  <pre id="v-caption"></pre>
+<dialog id="detail">
+  <div class="top"><strong id="d-title"></strong><span class="grow" style="flex:1"></span><span id="d-actions" class="row"></span><button onclick="detail.close()">Close</button></div>
+  <pre id="d-body"></pre>
 </dialog>
 
 <script>
 const $ = (sel, el = document) => el.querySelector(sel);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const UPCOMING_PAGE = 30;
-const state = { upcoming: {}, settingsOpen: {}, nowCount: {}, busy: false, error: "" };
+const STATES = ["queued", "running", "held", "dead", "succeeded", "canceled"];
+const PAGE = 50;
+const state = { lane: "*", states: ["queued", "running", "held", "dead"], type: "", offset: 0, newest: false, busy: false, error: "" };
+try { Object.assign(state, JSON.parse(localStorage.getItem("laneq.filters") || "{}"), { offset: 0 }); } catch {}
+const saveFilters = () => { try { localStorage.setItem("laneq.filters", JSON.stringify({ lane: state.lane, states: state.states, type: state.type, newest: state.newest })); } catch {} };
 
 async function api(method, path, body) {
   const r = await fetch(path, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
-  if (r.status === 204) return null;
+  if (r.status === 204 || r.status === 202) return { data: null, total: 0 };
   const data = await r.json().catch(() => null);
   if (!r.ok) throw new Error((data && data.error) || r.statusText);
-  return data;
+  return { data, total: +(r.headers.get("X-Total-Count") || 0) };
 }
-const jobs = (q) => api("GET", "/v1/jobs?" + new URLSearchParams(q));
+const get = async path => (await api("GET", path)).data;
 
 // --- formatting ---
-const dayKey = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-const fmtNight = d => d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
-const fmtTime = d => d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-const fmtWhen = s => { const d = new Date(s); return `${fmtNight(d)} ${fmtTime(d)}`; };
-function fmtIn(ms) {
-  if (ms <= 0) return "now";
-  const m = Math.round(ms / 60000), h = Math.floor(m / 60), d = Math.floor(h / 24);
-  if (d >= 1) return `in ${d}d ${h % 24}h`;
-  if (h >= 1) return `in ${h}h ${m % 60}m`;
-  return `in ${m}m`;
+function fmtWhen(s) {
+  if (!s || s.startsWith("0001")) return "";
+  const d = new Date(s), ms = d - Date.now(), abs = Math.abs(ms);
+  const rel = abs < 60e3 ? "now" : abs < 3600e3 ? `${Math.round(abs / 60e3)}m` : abs < 86400e3 ? `${Math.round(abs / 3600e3)}h` : `${Math.round(abs / 86400e3)}d`;
+  return `${d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })} <span class="muted">(${rel === "now" ? "now" : ms > 0 ? "in " + rel : rel + " ago"})</span>`;
 }
-
-// --- job previews (payload.preview = {title, subtitle, caption, media: [{url, type}]}) ---
-const preview = j => (j.payload && j.payload.preview) || {};
-const titleOf = j => preview(j).title || j.key || `${j.type} #${j.id}`;
-const media = j => preview(j).media || [];
-function mediaTag(m, attrs = "") {
-  if (!m) return "";
-  return m.type === "image"
-    ? `<img src="${esc(m.url)}" loading="lazy" alt="" ${attrs}>`
-    : `<video src="${esc(m.url)}#t=0.5" preload="metadata" muted playsinline ${attrs}></video>`;
-}
-const kindLabel = j => ({ carousel: "Carousel", image: "Photo", reel: "Reel" }[preview(j).kind] || j.type);
-
-function openViewer(id) {
-  const j = state.byId[id];
-  if (!j) return;
-  $("#v-title").textContent = `${titleOf(j)} · ${kindLabel(j)}`;
-  $("#v-gallery").innerHTML = media(j).map(m => m.type === "image"
-    ? `<img src="${esc(m.url)}" alt="">`
-    : `<video src="${esc(m.url)}" controls muted playsinline></video>`).join("") || `<div class="muted">No preview</div>`;
-  $("#v-caption").textContent = preview(j).caption || JSON.stringify(j.payload, null, 2);
-  viewer.showModal();
-}
+const laneName = l => l === "" ? "(no lane)" : l;
 
 // --- actions ---
 async function act(fn, confirmText) {
@@ -168,221 +109,193 @@ async function act(fn, confirmText) {
   catch (e) { state.error = e.message; }
   finally { state.busy = false; refresh(); }
 }
-const move = (id, delta) => act(() => api("POST", `/v1/jobs/${id}/move`, { delta }));
-const skip = id => act(() => api("POST", `/v1/jobs/${id}/cancel`), "Skip this post? It won't be posted.");
-const retry = id => act(() => api("POST", `/v1/jobs/${id}/retry`));
-const hold = id => act(() => api("POST", `/v1/jobs/${id}/hold`));
-const setTonight = (lane, day, count) => act(() => api("POST", `/v1/schedules/${encodeURIComponent(lane)}/override`, { day, count }));
+const jobAction = (id, what) => act(() => api("POST", `/v1/jobs/${id}/${what}`),
+  what === "cancel" ? `Cancel job #${id}? It won't run.` : "");
 const pause = (lane, paused) => act(() => api("POST", `/v1/lanes/${encodeURIComponent(lane)}/${paused ? "pause" : "resume"}`),
-  paused ? "Stop posting?\n\nA post that's going up right now finishes, then nothing else posts. "
-         + "Nightly runs are skipped while stopped, and nothing piles up: resuming starts again at the next run, "
-         + "with the posts that were waiting still first in line."
-         : "");
-function postNow(lane) {
-  const n = Math.max(1, Math.min(25, +$(`#now-${CSS.escape(lane)}`).value || 1));
-  act(() => api("POST", `/v1/lanes/${encodeURIComponent(lane)}/release`, { n }),
-    `Post the next ${n === 1 ? "post" : n + " posts"} right now? ${n === 1 ? "It goes" : "They go"} up one after another, for real.`);
+  paused ? `Pause lane "${lane}"? A running job finishes; nothing else in the lane runs until you resume.` : "");
+function clearLane(lane) {
+  const l = state.lanes.find(l => l.name === lane), c = l.counts || {};
+  const n = (c.queued || 0) + (c.held || 0) + (c.dead || 0);
+  act(() => api("POST", `/v1/lanes/${encodeURIComponent(lane)}/clear`, {}),
+    `Clear lane "${lane}"?\n\nThis cancels all ${n} waiting jobs (${c.queued || 0} queued, ${c.held || 0} held, ${c.dead || 0} dead). `
+    + "A running job finishes. Canceled jobs can't be brought back.");
 }
-function saveSettings(lane) {
-  const at = $(`#at-${CSS.escape(lane)}`).value, count = +$(`#count-${CSS.escape(lane)}`).value;
+function toggleSchedule(lane) {
   const s = state.schedules.find(s => s.lane === lane);
-  act(() => api("PUT", `/v1/schedules/${encodeURIComponent(lane)}`, { ...s, at, count }));
+  act(() => api("PUT", `/v1/schedules/${encodeURIComponent(lane)}`, { ...s, enabled: !s.enabled }),
+    s.enabled ? `Turn off the schedule for "${lane}"? Its daily releases stop until you turn it back on.` : "");
 }
-function toggleSettings(lane) { state.settingsOpen[lane] = !state.settingsOpen[lane]; render(); }
-function toggleBackground() {
-  state.showBackground = !state.showBackground;
-  try { localStorage.setItem("laneq.showBackground", state.showBackground ? "1" : ""); } catch {}
-  render();
+function powerOff() {
+  const up = (state.apps || []).filter(a => a.status === "running" || a.status === "stopping").map(a => a.title || a.name);
+  act(async () => { await api("POST", "/v1/admin/poweroff"); state.poweringOff = true; },
+    "Power off laneq?\n\n" + (up.length ? `First every app is stopped (${up.join(", ")}): each finishes the job it's on, `
+      + "and any still running after 2 minutes is ended. " : "No apps are running. ")
+    + "Then laneq writes a final snapshot and exits. Nothing runs until laneq and the apps are started again.");
 }
-try { state.showBackground = !!localStorage.getItem("laneq.showBackground"); } catch {}
-function moreUpcoming(lane) { state.upcoming[lane] = (state.upcoming[lane] || UPCOMING_PAGE) + UPCOMING_PAGE; refresh(); }
+function appAction(name, what) {
+  const a = state.apps.find(a => a.name === name), title = a.title || a.name;
+  act(() => api("POST", `/v1/apps/${encodeURIComponent(name)}/${what}`), {
+    stop: `Stop ${title}?\n\nIt finishes the job it's on, then exits. Its jobs wait in the queue until it's started again`
+      + (a.start_hint ? ` (${a.start_hint}).` : "."),
+    kill: `Kill ${title} now (process ${a.pid})?\n\nIt's ended at once, mid-job if it's working; that job runs again later. `
+      + "Use Stop unless it isn't responding.",
+  }[what]);
+}
+
+// --- filters ---
+function setLane(v) { state.lane = v; state.offset = 0; saveFilters(); refresh(); }
+function toggleState(s) {
+  state.states = state.states.includes(s) ? state.states.filter(x => x !== s) : [...state.states, s];
+  state.offset = 0; saveFilters(); refresh();
+}
+function setType(v) { state.type = v.trim(); state.offset = 0; saveFilters(); refresh(); }
+function toggleNewest() { state.newest = !state.newest; state.offset = 0; saveFilters(); refresh(); }
+function page(d) { state.offset = Math.max(0, state.offset + d * PAGE); refresh(); }
 
 // --- data ---
 async function refresh() {
   try {
-    const [lanes, schedules, active, dead, history] = await Promise.all([
-      api("GET", "/v1/lanes"), api("GET", "/v1/schedules"),
-      jobs({ state: "queued,running" }), jobs({ state: "dead" }),
-      jobs({ state: "succeeded", newest: "true", limit: 12 }),
-    ]);
-    const held = {};
-    await Promise.all(schedules.map(async s => {
-      held[s.lane] = await jobs({ lane: s.lane, state: "held", limit: s.next_count + (state.upcoming[s.lane] || UPCOMING_PAGE) });
-    }));
-    Object.assign(state, { lanes, schedules, active, dead, history, held, loaded: true });
-    state.byId = {};
-    for (const j of [...active, ...dead, ...history, ...Object.values(held).flat()]) state.byId[j.id] = j;
+    const q = new URLSearchParams({ limit: PAGE, offset: state.offset });
+    if (state.lane !== "*") q.set("lane", state.lane);
+    if (state.states.length) q.set("state", state.states.join(","));
+    if (state.type) q.set("type", state.type);
+    if (state.newest) q.set("newest", "true");
+    const [lanes, schedules, jobs, apps] = await Promise.all([get("/v1/lanes"), get("/v1/schedules"), api("GET", "/v1/jobs?" + q),
+      get("/v1/apps").catch(() => [])]);
+    Object.assign(state, { lanes, schedules, apps, jobs: jobs.data, total: jobs.total, loaded: true });
+    state.byId = Object.fromEntries(jobs.data.map(j => [j.id, j]));
     $("#conn").textContent = "live"; $("#conn").className = "chip ok";
   } catch (e) {
-    $("#conn").textContent = "server unreachable"; $("#conn").className = "chip bad";
+    $("#conn").textContent = state.poweringOff ? "powered off" : "server unreachable"; $("#conn").className = "chip bad";
   }
   render();
 }
 
 // --- rendering ---
-function card(j, order, canUp, canDown) {
-  const m = media(j);
-  return `<div class="card">
-    <div class="thumb" onclick="openViewer(${j.id})">
-      ${mediaTag(m[0])}
-      ${order ? `<span class="order">#${order}</span>` : ""}
-      ${m.length > 1 ? `<span class="count">1/${m.length}</span>` : ""}
-      <span class="kind">${esc(kindLabel(j))}</span>
-    </div>
-    <div class="body">
-      <div class="title" title="${esc(titleOf(j))}">${esc(titleOf(j))}</div>
-      ${preview(j).subtitle ? `<div class="muted">${esc(preview(j).subtitle)}</div>` : ""}
-      <div class="actions">
-        <button class="icon" title="Earlier" onclick="move(${j.id},-1)" ${canUp ? "" : "disabled"}>↑</button>
-        <button class="icon" title="Later" onclick="move(${j.id},1)" ${canDown ? "" : "disabled"}>↓</button>
-        <span class="grow"></span>
-        <button class="danger" onclick="skip(${j.id})">Skip</button>
-      </div>
-    </div>
-  </div>`;
+function counts(c = {}) {
+  const shown = STATES.filter(s => c[s]);
+  return shown.length ? shown.map(s => `<span class="chip state-${s}">${c[s]} ${s}</span>`).join("") : `<span class="muted">empty</span>`;
 }
 
-function item(j, right, extra = "") {
-  return `<div class="item">
-    <div class="mini" onclick="openViewer(${j.id})">${mediaTag(media(j)[0])}</div>
-    <div class="meta">
-      <div class="title">${esc(titleOf(j))}</div>
-      <div class="muted">${esc(kindLabel(j))}${j.lane ? " · " + esc(j.lane) : ""}${extra}</div>
-      ${j.last_error ? `<div class="err">${esc(j.last_error)}</div>` : ""}
-    </div>
-    <div class="row">${right}</div>
-  </div>`;
-}
+// Lanes named "<app>/<lane>" belong to that app; the rest are grouped under "Other".
+const appOf = name => name.includes("/") ? name.slice(0, name.indexOf("/")) : "";
+const STATUS_CHIP = { running: "ok", stopping: "warn", stopped: "", "not responding": "bad" };
 
-function lanePanel(s) {
-  const lane = state.lanes.find(l => l.name === s.lane) || { counts: {} };
-  const held = state.held[s.lane] || [];
-  const next = new Date(s.next_run);
-  const nightKey = dayKey(next);
-  const tonight = held.slice(0, s.next_count);
-  const rest = held.slice(s.next_count);
-  const overridden = s.overrides && nightKey in s.overrides;
-  const blocked = state.dead.some(j => j.lane === s.lane);
-  const nights = [];
-  for (let i = 0, d = 1; i < rest.length; d++) {
-    const day = new Date(next); day.setDate(day.getDate() + d);
-    const n = (s.overrides && s.overrides[dayKey(day)]) ?? s.count;
-    if (n === 0) { nights.push({ day, jobs: [] }); continue; }
-    nights.push({ day, jobs: rest.slice(i, i + n) }); i += n;
-    if (d > 400) break;
-  }
-  const leftNights = s.count ? Math.ceil(s.held / s.count) : 0;
-  const L = esc(JSON.stringify(s.lane));
+function appsPanel() {
+  const rows = state.apps.map(a => {
+    const N = esc(JSON.stringify(a.name)), up = a.status === "running" || a.status === "stopping";
+    return `<tr>
+      <td><strong>${esc(a.title || a.name)}</strong>${a.title ? ` <span class="muted">${esc(a.name)}</span>` : ""}
+        ${a.dashboard ? `<div><a href="${esc(a.dashboard)}" target="_blank" rel="noopener">Open its dashboard ↗</a></div>` : ""}</td>
+      <td><span class="chip ${STATUS_CHIP[a.status] ?? ""}">${esc(a.status)}</span>
+        ${a.status === "stopped" && a.start_hint ? `<div class="muted">start: ${esc(a.start_hint)}</div>` : ""}</td>
+      <td class="num">${a.pid ? `pid ${a.pid}` : ""}<div class="muted">seen ${fmtWhen(a.last_seen)}</div></td>
+      <td><div class="row">
+        <button onclick='appAction(${N}, "stop")' ${up && !a.stop ? "" : "disabled"}>Stop</button>
+        <button class="danger" onclick='appAction(${N}, "kill")' ${up ? "" : "disabled"}>Kill</button>
+      </div></td>
+    </tr>`;
+  }).join("");
   return `<section class="panel">
-    <h2>${esc(s.lane)}
-      ${lane.paused ? `<span class="chip warn">stopped</span>` : s.enabled ? `<span class="chip ok">scheduled</span>` : `<span class="chip">schedule off</span>`}
-      ${blocked ? `<span class="chip bad">blocked: needs attention</span>` : ""}
-      <span class="grow" style="flex:1"></span>
-      <button class="${lane.paused ? "primary" : "danger"}" onclick='pause(${L}, ${!lane.paused})'>${lane.paused ? "Resume posting" : "Stop posting"}</button>
-      <button onclick='toggleSettings(${L})'>Settings</button>
-    </h2>
-    <div class="next">
-      <div>
-        <div class="muted">Next run</div>
-        ${lane.paused ? `<div class="when">Stopped</div>
-        <div class="muted">Nothing posts until you resume. Nights while stopped are skipped, not made up.</div>`
-        : `<div class="when">${esc(fmtNight(next))}, ${esc(fmtTime(next))} <span class="muted" style="font-size:14px;font-weight:400">${esc(fmtIn(next - Date.now()))}</span></div>`}
-        <div class="muted">${s.held} posts waiting · about ${leftNights} nights at ${s.count} a night</div>
-      </div>
-      <div>
-        <div class="muted">Posts this run${overridden ? ` (default ${s.count})` : ""}</div>
-        <div class="row">
-          <span class="stepper">
-            <button onclick='setTonight(${L}, "${nightKey}", ${Math.max(0, s.next_count - 1)})' ${s.next_count <= 0 ? "disabled" : ""}>−</button>
-            <output>${s.next_count}</output>
-            <button onclick='setTonight(${L}, "${nightKey}", ${s.next_count + 1})' ${s.next_count >= 25 ? "disabled" : ""}>+</button>
-          </span>
-          ${overridden ? `<button onclick='setTonight(${L}, "${nightKey}", -1)'>Reset</button>` : ""}
-        </div>
-      </div>
-      <div class="row" style="grid-column: 1 / -1; padding-top: 8px; border-top: 1px dashed var(--line); margin-top: 6px">
-        <span class="muted">Don't wait for the schedule:</span>
-        <input type="number" id="now-${esc(s.lane)}" min="1" max="25" value="${state.nowCount[s.lane] || 1}" style="width:60px"
-               oninput="state.nowCount[${esc(JSON.stringify(s.lane))}] = +this.value">
-        <button class="primary" onclick='postNow(${L})' ${held.length && !lane.paused ? "" : "disabled"}>Post now</button>
-        <span class="muted">${lane.paused ? "posting is stopped; resume to post" : `takes the next posts in line; tonight's run still posts its ${s.next_count}`}</span>
-      </div>
-    </div>
-    <div class="settings ${state.settingsOpen[s.lane] ? "open" : ""}">
-      <label>Daily at <input type="time" id="at-${esc(s.lane)}" value="${esc(s.at)}"></label>
-      <label>Posts a night <input type="number" id="count-${esc(s.lane)}" min="0" max="25" value="${s.count}" style="width:60px"></label>
-      <button class="primary" onclick='saveSettings(${L})'>Save</button>
-    </div>
-
-    <h3>This run</h3>
-    ${tonight.length ? `<div class="cards">${tonight.map((j, i) => card(j, i + 1, i > 0, i < held.length - 1)).join("")}</div>`
-                     : `<div class="empty">Nothing to post${s.next_count === 0 ? " — this run is set to 0" : ""}.</div>`}
-
-    <h3>Coming up</h3>
-    ${nights.length ? nights.map(n => `<div class="night">
-        <div class="date">${esc(fmtNight(n.day))}</div>
-        <div class="strip">${n.jobs.length ? n.jobs.map(j => `<div class="mini" title="${esc(titleOf(j))}" onclick="openViewer(${j.id})">${mediaTag(media(j)[0])}</div>`).join("") : `<span class="muted">no posts</span>`}</div>
-      </div>`).join("") : `<div class="empty">Nothing else queued.</div>`}
-    ${held.length < s.held ? `<div class="row" style="margin-top:10px"><button onclick='moreUpcoming(${L})'>Show more</button><span class="muted">${s.held - held.length} more</span></div>` : ""}
+    <h2>Apps <span class="chip">${state.apps.length}</span></h2>
+    ${state.apps.length ? `<div class="scroll"><table><tr><th>App</th><th>Status</th><th>Process</th><th></th></tr>${rows}</table></div>`
+      : `<div class="empty">No app has checked in. An app's worker shows up here once it sends POST /v1/apps/{name}/heartbeat.</div>`}
   </section>`;
 }
 
-function render() {
-  const app = $("#app");
-  if (!state.loaded) { app.innerHTML = `<div class="empty">Loading…</div>`; return; }
-  const open = viewer.open;
-  // Jobs with a preview are posts; the rest (e.g. monthly token refreshes) are
-  // background jobs, hidden from "Posting now" unless toggled on.
-  const isPost = j => !!(j.payload && j.payload.preview);
-  const background = state.active.filter(j => !isPost(j)).sort((a, b) => new Date(a.run_at) - new Date(b.run_at));
-  const shown = state.showBackground ? state.active : state.active.filter(isPost);
-  const soon = Date.now() + 3600e3; // posts released for later tonight stay out of the way until close
-  const running = shown.filter(j => j.state === "running");
-  const waiting = shown.filter(j => j.state === "queued" && (!isPost(j) || new Date(j.run_at) <= soon || j.last_error))
-    .sort((a, b) => new Date(a.run_at) - new Date(b.run_at));
-  const queueItem = j => item(j,
-    `<span class="chip${j.last_error ? " warn" : ""}">${j.last_error ? "retrying" : isPost(j) ? "up next" : "scheduled"} ${esc(fmtIn(new Date(j.run_at) - Date.now()))}</span>`
-      + (j.lane ? ` <button onclick="hold(${j.id})" title="Put it back in line for a later run">Hold back</button>` : ""),
-    (isPost(j) ? "" : ` · ${esc(fmtWhen(j.run_at))}`) + (j.attempts ? ` · ${j.attempts} attempts so far` : ""));
-  const posted = state.history.filter(isPost);
+function lanesPanel() {
+  const titleOf = app => (state.apps.find(a => a.name === app) || {}).title || app;
+  const groups = [...new Set(state.lanes.map(l => appOf(l.name)))].sort((a, b) => (a === "") - (b === "") || a.localeCompare(b));
+  const laneRow = l => {
+    const s = state.schedules.find(s => s.lane === l.name), L = esc(JSON.stringify(l.name));
+    const waiting = (l.counts.queued || 0) + (l.counts.held || 0) + (l.counts.dead || 0);
+    const sched = !s ? `<span class="muted">none</span>`
+      : `<span class="chip ${s.enabled ? "ok" : ""}">${s.enabled ? "on" : "off"}</span> ${esc(s.at)} · ${s.count}/day`
+        + (s.enabled && !l.paused ? `<div class="muted">next ${fmtWhen(s.next_run)}</div>` : "");
+    return `<tr>
+      <td><a href="#" onclick='setLane(${L}); return false'>${esc(laneName(appOf(l.name) ? l.name.slice(appOf(l.name).length + 1) : l.name))}</a>
+        ${l.paused ? ` <span class="chip warn">paused</span>` : ""}</td>
+      <td><div class="counts">${counts(l.counts)}</div></td>
+      <td>${sched}</td>
+      <td><div class="row">
+        ${l.name === "" ? `<span class="muted">jobs without a lane run independently</span>` : `
+        <button onclick='pause(${L}, ${!l.paused})' class="${l.paused ? "primary" : ""}">${l.paused ? "Resume" : "Pause"}</button>
+        ${s ? `<button onclick='toggleSchedule(${L})'>Schedule ${s.enabled ? "off" : "on"}</button>` : ""}
+        <button class="danger" onclick='clearLane(${L})' ${waiting ? "" : "disabled"}>Clear…</button>`}
+      </div></td>
+    </tr>`;
+  };
+  const rows = groups.map(g => `<tr class="group"><td colspan="4">${g ? esc(titleOf(g)) : "Other"}</td></tr>`
+    + state.lanes.filter(l => appOf(l.name) === g).map(laneRow).join("")).join("");
+  return `<section class="panel">
+    <h2>Lanes <span class="chip">${state.lanes.length}</span></h2>
+    ${state.lanes.length ? `<div class="scroll"><table>
+      <tr><th>Lane</th><th>Jobs</th><th>Schedule</th><th></th></tr>${rows}</table></div>`
+      : `<div class="empty">No jobs yet.</div>`}
+  </section>`;
+}
 
-  app.innerHTML = `
-    ${state.error ? `<div class="banner">${esc(state.error)}</div>` : ""}
-    ${state.dead.length ? `<section class="panel">
-      <h2>Needs attention <span class="chip bad">${state.dead.length}</span></h2>
-      <p class="muted" style="margin-top:-6px">These failed and won't be retried on their own. Everything after them in the same lane waits, so posts never go up out of order.</p>
-      <div class="list">${state.dead.map(j => item(j, `<button class="primary" onclick="retry(${j.id})">Retry</button><button class="danger" onclick="skip(${j.id})">Skip</button>`, ` · ${j.attempts} attempts`)).join("")}</div>
-    </section>` : ""}
-    <div class="layout">
-      <div>
-        ${state.schedules.length ? state.schedules.map(lanePanel).join("") : `<section class="panel"><div class="empty">No schedules yet. Create one with PUT /v1/schedules/{lane}.</div></section>`}
-      </div>
-      <div class="side">
-        <section class="panel">
-          <h2>Posting now
-            <span class="grow"></span>
-            ${background.length ? `<button class="toggle" aria-pressed="${!!state.showBackground}" onclick="toggleBackground()"
-                title="Jobs that aren't posts, like token refreshes">${state.showBackground ? "Hide" : "Show"} background jobs (${background.length})</button>` : ""}
-          </h2>
-          ${running.length || waiting.length ? `<div class="list">
-            ${running.map(j => item(j, `<span class="chip ok">running</span>`, ` · attempt ${j.attempts} on ${esc(j.worker)}`)).join("")}
-            ${waiting.map(queueItem).join("")}
-          </div>` : `<div class="empty">Nothing posting right now.</div>`}
-        </section>
-        <section class="panel">
-          <h2>Recently posted</h2>
-          ${posted.length ? `<div class="list">${posted.map(j => item(j,
-              j.result && j.result.permalink ? `<a href="${esc(j.result.permalink)}" target="_blank" rel="noopener">Open ↗</a>` : `<span class="chip">${esc((j.result && j.result.mode) || "done")}</span>`,
-              ` · ${esc(fmtWhen(j.finished_at))}`)).join("")}</div>` : `<div class="empty">Nothing yet.</div>`}
-        </section>
-      </div>
-    </div>`;
-  if (open && !viewer.open) viewer.showModal();
+function actionsFor(j) {
+  const b = [];
+  if (j.state === "dead" || (j.state === "queued" && j.last_error)) b.push(`<button class="primary" onclick="event.stopPropagation(); jobAction(${j.id}, 'retry')">Retry</button>`);
+  if (j.state === "queued" && j.lane) b.push(`<button onclick="event.stopPropagation(); jobAction(${j.id}, 'hold')" title="Back to held, until its lane's next release">Hold</button>`);
+  if (["queued", "held", "dead"].includes(j.state)) b.push(`<button class="danger" onclick="event.stopPropagation(); jobAction(${j.id}, 'cancel')">Cancel</button>`);
+  return b.join("");
+}
+
+function jobsPanel() {
+  const lanes = ["*", ...state.lanes.map(l => l.name)];
+  const rows = state.jobs.map(j => `<tr class="job" onclick="openJob(${j.id})">
+      <td class="num">#${j.id}</td>
+      <td>${esc(j.type)}</td>
+      <td>${esc(laneName(j.lane || ""))}</td>
+      <td><div class="key" title="${esc(j.key)}">${esc(j.key) || `<span class="muted">—</span>`}</div>
+        ${j.last_error ? `<div class="err" title="${esc(j.last_error)}">${esc(j.last_error)}</div>` : ""}</td>
+      <td><span class="chip state-${j.state}">${j.state}</span></td>
+      <td class="num">${j.attempts}/${j.max_attempts}</td>
+      <td class="num">${j.state === "running" ? `lease ${fmtWhen(j.lease_expires)}` : j.finished_at ? fmtWhen(j.finished_at) : fmtWhen(j.run_at)}</td>
+      <td><div class="row">${actionsFor(j)}</div></td>
+    </tr>`).join("");
+  const from = state.total ? state.offset + 1 : 0, to = state.offset + state.jobs.length;
+  return `<section class="panel">
+    <h2>Jobs <span class="chip">${state.total}</span></h2>
+    <div class="row" style="margin-bottom:10px">
+      <label>Lane <select onchange="setLane(this.value)">${lanes.map(l => `<option value="${esc(l)}" ${l === state.lane ? "selected" : ""}>${l === "*" ? "all lanes" : esc(laneName(l))}</option>`).join("")}</select></label>
+      <span class="muted">State</span>
+      ${STATES.map(s => `<button class="toggle" aria-pressed="${state.states.includes(s)}" onclick="toggleState('${s}')">${s}</button>`).join("")}
+      <label>Type <input value="${esc(state.type)}" placeholder="any" size="12" onchange="setType(this.value)"></label>
+      <button class="toggle" aria-pressed="${state.newest}" onclick="toggleNewest()">newest first</button>
+    </div>
+    ${state.jobs.length ? `<div class="scroll"><table>
+      <tr><th>ID</th><th>Type</th><th>Lane</th><th>Key</th><th>State</th><th>Tries</th><th>When</th><th></th></tr>${rows}</table></div>`
+      : `<div class="empty">No jobs match.</div>`}
+    <div class="row" style="margin-top:10px">
+      <span class="muted">${from}–${to} of ${state.total}</span><span class="grow"></span>
+      <button onclick="page(-1)" ${state.offset ? "" : "disabled"}>← Previous</button>
+      <button onclick="page(1)" ${to < state.total ? "" : "disabled"}>Next →</button>
+    </div>
+  </section>`;
+}
+
+function openJob(id) {
+  const j = state.byId[id];
+  if (!j) return;
+  $("#d-title").textContent = `#${j.id} ${j.type}${j.lane ? " · " + j.lane : ""} · ${j.state}`;
+  $("#d-actions").innerHTML = actionsFor(j).replaceAll("event.stopPropagation(); ", "detail.close(); ");
+  $("#d-body").textContent = JSON.stringify(j, null, 2);
+  detail.showModal();
+}
+
+function render() {
+  if (!state.loaded) { $("#app").innerHTML = `<div class="empty">Loading…</div>`; return; }
+  $("#where").textContent = location.host;
+  $("#app").innerHTML = `${state.error ? `<div class="banner">${esc(state.error)}</div>` : ""}`
+    + `${state.poweringOff ? `<div class="banner">Powering off: stopping the apps, then laneq…</div>` : ""}`
+    + `${appsPanel()}${lanesPanel()}${jobsPanel()}`;
 }
 
 refresh();
-setInterval(() => { if (!state.busy && !viewer.open) refresh(); }, 5000);
-setInterval(() => { if (!viewer.open) render(); }, 30000); // keep countdowns fresh
+setInterval(() => { if (!state.busy && !detail.open && document.activeElement?.tagName !== "INPUT") refresh(); }, 5000);
 </script>
 </body>
 </html>

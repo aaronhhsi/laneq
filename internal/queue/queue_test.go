@@ -488,3 +488,86 @@ func TestConcurrentWorkersNeverShareAJob(t *testing.T) {
 		t.Fatalf("ran %d jobs, want %d", len(seen), n)
 	}
 }
+
+func TestClearCancelsALanesWaitingJobsButNotRunningOnes(t *testing.T) {
+	q, c, dir := newQueue(t)
+	running := enqueue(t, q, EnqueueRequest{Type: "post", Lane: "a"})
+	queued := enqueue(t, q, EnqueueRequest{Type: "post", Lane: "a"})
+	held := enqueue(t, q, EnqueueRequest{Type: "post", Lane: "a", Hold: true})
+	other := enqueue(t, q, EnqueueRequest{Type: "post", Lane: "b"})
+	mustClaimID(t, q, running.ID)
+
+	n, err := q.Clear("a", nil)
+	if err != nil || n != 2 {
+		t.Fatalf("Clear = %d, %v; want 2 (queued and held)", n, err)
+	}
+	if _, err := q.Clear("a", []State{Running}); !errors.Is(err, ErrInvalid) {
+		t.Errorf("clearing running jobs: %v; want ErrInvalid", err)
+	}
+	if _, err := q.Clear("", nil); !errors.Is(err, ErrInvalid) {
+		t.Errorf("clearing no lane: %v; want ErrInvalid", err)
+	}
+	q.Close()
+	q = open(t, dir, c) // the cancellations are durable
+	defer q.Close()
+	for id, want := range map[int64]State{running.ID: Running, queued.ID: Canceled, held.ID: Canceled, other.ID: Queued} {
+		if j, _ := q.Get(id); j.State != want {
+			t.Errorf("job %d: %s, want %s", id, j.State, want)
+		}
+	}
+}
+
+func TestRenameLaneMovesJobsScheduleAndPauseInOrder(t *testing.T) {
+	q, c, dir := newQueue(t)
+	done := enqueue(t, q, EnqueueRequest{Type: "post", Lane: "photos"})
+	l := mustClaimID(t, q, done.ID)
+	if _, err := q.Complete(l.Job.ID, l.Token, nil); err != nil {
+		t.Fatal(err)
+	}
+	a := enqueue(t, q, EnqueueRequest{Type: "post", Lane: "photos", Hold: true})
+	b := enqueue(t, q, EnqueueRequest{Type: "post", Lane: "photos", Hold: true})
+	if _, err := q.SetSchedule(Schedule{Lane: "photos", Enabled: true, At: "00:00", Count: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.SetPaused("photos", true); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := q.RenameLane("photos", "app/photos"); err != nil || n != 3 {
+		t.Fatalf("RenameLane = %d, %v; want 3 jobs moved", n, err)
+	}
+	q.Close()
+	q = open(t, dir, c) // it's all in the log
+	defer q.Close()
+
+	names := []string{}
+	for _, s := range q.Lanes() {
+		names = append(names, s.Name)
+		if s.Name == "app/photos" && (!s.Paused || s.Counts[Held] != 2 || s.Counts[Succeeded] != 1) {
+			t.Errorf("app/photos = %+v; want paused, 2 held, 1 succeeded", s)
+		}
+	}
+	if len(names) != 1 || names[0] != "app/photos" {
+		t.Errorf("lanes = %v; want only app/photos", names)
+	}
+	scheds := q.Schedules()
+	if len(scheds) != 1 || scheds[0].Lane != "app/photos" || scheds[0].Count != 1 {
+		t.Fatalf("schedules = %+v; want the one schedule, moved", scheds)
+	}
+	if _, err := q.SetPaused("app/photos", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Release("app/photos", 2, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	mustClaimID(t, q, a.ID) // still in order: a, then b
+	mustClaimNone(t, q)
+	_ = b
+
+	if _, err := q.RenameLane("app/photos", "other"); !errors.Is(err, ErrBadState) {
+		t.Errorf("renaming with a job running: %v; want ErrBadState", err)
+	}
+	enqueue(t, q, EnqueueRequest{Type: "post", Lane: "taken"})
+	if _, err := q.RenameLane("nope", "taken"); !errors.Is(err, ErrInvalid) {
+		t.Errorf("renaming onto a lane in use: %v; want ErrInvalid", err)
+	}
+}

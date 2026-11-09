@@ -1,4 +1,5 @@
-﻿laneq.exe
+laneq.exe
 laneq-data/
-
 laneq-bg.exe
+*.exe
+usage-stats/supabase/.temp/

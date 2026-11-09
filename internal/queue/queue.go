@@ -151,7 +151,11 @@ func (q *Queue) apply(r record) {
 		q.applyJob(r.Job)
 	}
 	if r.Schedule != nil {
-		q.schedules[r.Schedule.Lane] = *r.Schedule
+		if r.Schedule.Removed {
+			delete(q.schedules, r.Schedule.Lane)
+		} else {
+			q.schedules[r.Schedule.Lane] = *r.Schedule
+		}
 	}
 }
 
@@ -177,9 +181,11 @@ func (q *Queue) applyJob(j *Job) {
 	l := q.lane(j.Lane)
 	wasActive := old != nil && !old.State.Finished()
 	isActive := !j.State.Finished()
-	moved := old != nil && old.Seq != j.Seq
+	// moved: a new place in its lane (Move), or a new lane (RenameLane)
+	moved := old != nil && (old.Seq != j.Seq || old.Lane != j.Lane)
 	if wasActive && (!isActive || moved) {
-		l.active = slices.DeleteFunc(l.active, func(id int64) bool { return id == j.ID })
+		ol := q.lane(old.Lane)
+		ol.active = slices.DeleteFunc(ol.active, func(id int64) bool { return id == j.ID })
 	}
 	if isActive && (!wasActive || moved) {
 		i := sort.Search(len(l.active), func(i int) bool { return q.jobs[l.active[i]].Seq > j.Seq })
@@ -727,6 +733,91 @@ func (q *Queue) Cancel(id int64) (_ Job, err error) {
 	return q.jobs[id].Public(), nil
 }
 
+// Clear cancels every job in a lane that's in one of states (default: queued,
+// held and dead; a running job is never canceled, it finishes). It's one
+// operation, so a lane with thousands of jobs clears in one flush.
+func (q *Queue) Clear(laneName string, states []State) (n int, err error) {
+	if laneName == "" {
+		return 0, fmt.Errorf("%w: lane is required", ErrInvalid)
+	}
+	if len(states) == 0 {
+		states = []State{Queued, Held, Dead}
+	}
+	for _, s := range states {
+		if s == Running || s.Finished() {
+			return 0, fmt.Errorf("%w: can't clear %s jobs", ErrInvalid, s)
+		}
+	}
+	q.mu.Lock()
+	defer q.done(&err)
+	var ids []int64 // collected first: applying a change updates q.jobs
+	for id, j := range q.jobs {
+		if j.Lane == laneName && slices.Contains(states, j.State) {
+			ids = append(ids, id)
+		}
+	}
+	slices.Sort(ids)
+	now := q.opts.Now()
+	for _, id := range ids {
+		j := *q.jobs[id]
+		j.State, j.FinishedAt = Canceled, now
+		if err := q.put(j); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
+}
+
+// RenameLane moves every job of a lane (finished ones too, so its history moves
+// with it), its paused state and its schedule to a new name, in one operation.
+// Order is kept: jobs keep their Seq. It refuses while a job in the lane is
+// running, and when the new name is already in use.
+func (q *Queue) RenameLane(from, to string) (n int, err error) {
+	if from == "" || to == "" || from == to {
+		return 0, fmt.Errorf("%w: need two different, non-empty lane names", ErrInvalid)
+	}
+	q.mu.Lock()
+	defer q.done(&err)
+	if _, ok := q.schedules[to]; ok {
+		return 0, fmt.Errorf("%w: lane %q already has a schedule", ErrInvalid, to)
+	}
+	var ids []int64
+	for id, j := range q.jobs {
+		switch j.Lane {
+		case to:
+			return 0, fmt.Errorf("%w: lane %q already has jobs", ErrInvalid, to)
+		case from:
+			if j.State == Running {
+				return 0, fmt.Errorf("%w: job %d is running in %q; try again when it's done", ErrBadState, id, from)
+			}
+			ids = append(ids, id)
+		}
+	}
+	slices.Sort(ids)
+	now := q.opts.Now()
+	var recs []record
+	for _, id := range ids {
+		j := *q.jobs[id]
+		j.Lane, j.UpdatedAt = to, now
+		recs = append(recs, record{Job: &j})
+	}
+	if l, ok := q.lanes[from]; ok && l.state.Paused {
+		moved, cleared := LaneState{Name: to, Paused: true}, LaneState{Name: from}
+		recs = append(recs, record{Lane: &moved}, record{Lane: &cleared})
+	}
+	if s, ok := q.schedules[from]; ok {
+		s = cloneSchedule(s)
+		s.Lane = to
+		removed := Schedule{Lane: from, Removed: true}
+		recs = append(recs, record{Schedule: &s}, record{Schedule: &removed})
+	}
+	if len(recs) == 0 {
+		return 0, ErrNotFound
+	}
+	return len(ids), q.commit(recs...)
+}
+
 // Hold returns a queued job to held, undoing a release: it waits for the next
 // release instead of running.
 func (q *Queue) Hold(id int64) (_ Job, err error) {
@@ -902,6 +993,9 @@ func (q *Queue) Lanes() []LaneSummary {
 	}
 	var out []LaneSummary
 	for name, l := range q.lanes {
+		if byLane[name] == nil && !l.state.Paused {
+			continue // nothing in it (e.g. the old name of a renamed lane)
+		}
 		s := LaneSummary{Name: name, Paused: l.state.Paused, Counts: byLane[name]}
 		if s.Counts == nil {
 			s.Counts = map[State]int{}

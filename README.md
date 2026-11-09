@@ -1,11 +1,20 @@
-﻿# laneq
+# laneq
+
+[![jobs processed](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fbpplyuckjuiuuyazcvzi.supabase.co%2Ffunctions%2Fv1%2Fstats&query=%24.badges.jobs&label=jobs%20processed&color=3d5afe&cacheSeconds=3600)](#usage-stats)
+[![laneq data](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fbpplyuckjuiuuyazcvzi.supabase.co%2Ffunctions%2Fv1%2Fstats&query=%24.badges.laneq_data&label=data%20managed%20by%20laneq&color=3d5afe&cacheSeconds=3600)](#usage-stats)
+[![installs](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fbpplyuckjuiuuyazcvzi.supabase.co%2Ffunctions%2Fv1%2Fstats&query=%24.laneq.installs&label=installs&color=3d5afe&cacheSeconds=3600)](#usage-stats)
+[![posts published with lanecast](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fbpplyuckjuiuuyazcvzi.supabase.co%2Ffunctions%2Fv1%2Fstats&query=%24.badges.posts&label=posts%20published%20with%20lanecast&color=1b7f4b&cacheSeconds=3600)](https://github.com/aaronhhsi/lanecast)
+[![media managed by lanecast](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fbpplyuckjuiuuyazcvzi.supabase.co%2Ffunctions%2Fv1%2Fstats&query=%24.badges.media&label=media%20managed%20by%20lanecast&color=1b7f4b&cacheSeconds=3600)](https://github.com/aaronhhsi/lanecast)
+
+Live totals across every laneq and [lanecast](https://github.com/aaronhhsi/lanecast) install, reported once a
+day ([how](#usage-stats)).
 
 A durable job queue in Go with ordered lanes, leases and retries, served over
 HTTP/JSON so workers can be written in any language. Standard library only.
 
-It runs an automated publishing pipeline in production: a Python worker posts a
-1,700-post photo archive to Instagram on a nightly schedule, where a duplicate
-or out-of-order post would be publicly visible.
+It runs an automated publishing pipeline in production: [lanecast](https://github.com/aaronhhsi/lanecast),
+a social media scheduler, posts thousands of queued photos and videos to six Instagram accounts on a nightly
+schedule, where a duplicate or out-of-order post would be publicly visible.
 
 ```mermaid
 flowchart LR
@@ -37,6 +46,18 @@ flowchart LR
   that runs out of attempts blocks its lane (it's never skipped), so later jobs
   can't overtake it. Jobs without a lane run in parallel.
 
+## In use
+
+**Running on my laptop** (local links, so they only open there):
+
+One laneq, shared by every app: **[127.0.0.1:7070](http://127.0.0.1:7070)** (its dashboard: each app with
+Stop / Kill, every lane and job, and a Power off for the whole thing).
+
+| App | Its dashboard | Its lanes |
+|---|---|---|
+| illitlauver: Instagram fan accounts, posted nightly | [127.0.0.1:7080](http://127.0.0.1:7080) | `illitlauver/*` |
+| Real Volleyball App: men's volleyball box scores every 6 hours | [real-volleyball-app.vercel.app](https://real-volleyball-app.vercel.app) | `real-volleyball/*` |
+
 ## Features
 
 - Retries with exponential backoff and jitter; `retry_after` for rate limits;
@@ -47,7 +68,11 @@ flowchart LR
   machine was asleep — without ever releasing the same day twice
 - Pausing a lane is a full stop: the running job finishes, released jobs go back
   in line, and paused days are skipped rather than made up
-- Long-polling claims and a built-in dashboard
+- One laneq for many apps: lanes are named `<app>/<lane>`, and each app's worker checks in
+  (`/v1/apps/{name}/heartbeat`), so the dashboard can stop it (after its current job) or kill it, and a
+  power-off stops every app before laneq itself
+- Long-polling claims, and a built-in dashboard for watching the queue: every app, lane and job, with retry,
+  cancel, clear, rename, pause and schedule on/off
 - Optional worker supervision: `laneq -- python worker.py` restarts the worker
   if it crashes, and (on Windows, via a job object) never leaves it orphaned
 
@@ -112,9 +137,12 @@ Why it is built this way, decision by decision: [DESIGN.md](DESIGN.md).
 | `POST /v1/jobs/{id}/complete` | `{token, result}` |
 | `POST /v1/jobs/{id}/fail` | `{token, error, retry_after_seconds, permanent}` |
 | `POST /v1/jobs/{id}/retry` · `/cancel` · `/move` | operator actions (`move`: `{delta: -1 or 1}`) |
-| `GET /v1/lanes` · `POST /v1/lanes/{lane}/pause` · `/resume` · `/release` | lanes (`release`: `{n, run_at}`) |
+| `GET /v1/stats` | totals since the queue was created: jobs (and by state), attempts, lanes, schedules, apps, bytes on disk |
+| `GET /v1/lanes` · `POST /v1/lanes/{lane}/pause` · `/resume` · `/release` · `/clear` · `/rename` | lanes (`release`: `{n, run_at}`; `clear` cancels the lane's waiting jobs: `{states}`, default queued, held, dead; `rename`: `{to}`, moves its jobs, pause and schedule) |
+| `GET /v1/apps` · `POST /v1/apps/{name}/heartbeat` · `/bye` · `/stop` · `/start` · `/kill` | apps: a worker checks in `{title, dashboard, start_hint, pid}` → `{stop}`; stop (after its job, sticky until start) and kill are accepted from this machine only |
 | `GET /v1/schedules` · `PUT /v1/schedules/{lane}` · `POST /v1/schedules/{lane}/override` | daily releases |
 | `POST /v1/admin/shutdown` | clean shutdown, from this machine only: stops the supervised worker, closes the port, writes a final snapshot, exits 0 |
+| `POST /v1/admin/poweroff` | the kill switch, from this machine only: stops every app (each finishes its current job; any still running after 2 minutes is ended), then shuts down |
 
 A minimal worker:
 
@@ -129,3 +157,15 @@ while True:
     except Exception as e:
         post(f"/v1/jobs/{lease['job']['id']}/fail", {"token": lease["token"], "error": str(e)})
 ```
+
+## Usage stats
+
+To show how much laneq is used, each install sends a few totals once a day to a small
+[Supabase function](usage-stats/): a random install id (made on first run, kept in the data
+directory), the version, and counts of jobs, succeeded jobs, attempts, lanes, schedules and apps, plus
+the size of the data on disk. Never lane names, job payloads or anything else from the queue. laneq
+says so when it starts, and `-usage-stats=false` (or `LANEQ_USAGE_STATS=off`) turns it off.
+
+The function accepts only that shape, drops numbers out of range, keeps one report per install per day,
+and limits how many installs one address can report. The table isn't readable with the public key; the
+totals it serves are what the badges above show: `curl https://bpplyuckjuiuuyazcvzi.supabase.co/functions/v1/stats`.

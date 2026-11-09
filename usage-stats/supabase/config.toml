@@ -1,0 +1,3 @@
+# The stats function is public: installs POST reports, README badges GET totals.
+[functions.stats]
+verify_jwt = false
