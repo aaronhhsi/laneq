@@ -11,6 +11,12 @@ import (
 //
 // A run that was missed because the machine was asleep or off happens as soon as
 // the queue is running again, and makes up for up to MaxCatchUp missed days.
+//
+// With IntervalSeconds set, a run spreads its jobs over the day instead: one every
+// interval until the next run, and the ones that don't fit at the run itself. A
+// spread job that falls more than a few minutes behind (the machine was asleep)
+// moves the lane's remaining spread jobs along to one every interval from then,
+// and whatever no longer fits waits for the next run.
 // The released jobs and the record that the day has run are written in a single
 // log append, so a crash can never release the same day twice.
 type Schedule struct {
@@ -20,6 +26,8 @@ type Schedule struct {
 	Count      int    `json:"count"`        // jobs released per run
 	GapSeconds int    `json:"gap_seconds"`  // spacing between the released jobs' run_at
 	MaxCatchUp int    `json:"max_catch_up"` // most missed days made up at once
+	// IntervalSeconds spreads each run's jobs over the day, one per interval (0: all at the run).
+	IntervalSeconds int `json:"interval_seconds,omitempty"`
 
 	// EnabledBeforePause remembers Enabled while the lane is paused: pausing
 	// switches the schedule off, and resuming restores exactly this. Changing
@@ -52,8 +60,11 @@ func (s *Schedule) validate() error {
 	if _, err := time.Parse("15:04", s.At); err != nil {
 		return fmt.Errorf("%w: at must be HH:MM", ErrInvalid)
 	}
-	if s.Count < 0 || s.GapSeconds < 0 || s.MaxCatchUp < 0 {
-		return fmt.Errorf("%w: count, gap_seconds and max_catch_up can't be negative", ErrInvalid)
+	if s.Count < 0 || s.GapSeconds < 0 || s.MaxCatchUp < 0 || s.IntervalSeconds < 0 {
+		return fmt.Errorf("%w: count, gap_seconds, max_catch_up and interval_seconds can't be negative", ErrInvalid)
+	}
+	if s.IntervalSeconds > 0 && s.IntervalSeconds < 60 {
+		return fmt.Errorf("%w: interval_seconds must be at least 60", ErrInvalid)
 	}
 	for day, n := range s.Overrides {
 		if _, err := time.Parse(slotDate, day); err != nil || n < 0 {
@@ -92,6 +103,52 @@ func (s *Schedule) countFor(slot time.Time) int {
 		return n
 	}
 	return s.Count
+}
+
+func (s *Schedule) interval() time.Duration { return time.Duration(s.IntervalSeconds) * time.Second }
+
+// fits is how many spread jobs fit between now and the next run: one per interval, after now.
+func (s *Schedule) fits(now time.Time) int {
+	left := s.nextSlot(now).Sub(now)
+	return int((left - 1) / s.interval())
+}
+
+// lateBy is how far a spread job may fall behind before the rest are moved along. Short of it,
+// the worker is just busy with the jobs ahead.
+func (s *Schedule) lateBy() time.Duration { return min(s.interval()/6, 10*time.Minute) }
+
+// respaceLocked moves a spread lane's hourly jobs along once the first of them is late:
+// one per interval from now, and the ones that don't fit before the next run to that run.
+// Jobs due at a run that has come (RunAt at or before the latest run time) are left alone:
+// they go at that run, even if it happens late because the machine was off.
+func (q *Queue) respaceLocked(s Schedule, now time.Time) []record {
+	l := q.lanes[s.Lane]
+	if s.IntervalSeconds == 0 || l == nil {
+		return nil
+	}
+	cut := s.prevSlot(now) // in now's zone, like the runs: LastRun may come back from the log in UTC
+	var spread []*Job
+	for _, id := range l.active {
+		if j := q.jobs[id]; j.State == Queued && j.RunAt.After(cut) {
+			spread = append(spread, j)
+		}
+	}
+	if len(spread) == 0 || !spread[0].RunAt.Before(now.Add(-s.lateBy())) {
+		return nil
+	}
+	next, at := s.nextSlot(now), now
+	var recs []record
+	for _, cur := range spread {
+		j := *cur
+		if at.Before(next) {
+			j.RunAt, at = at, at.Add(s.interval())
+		} else {
+			j.RunAt = next
+		}
+		j.UpdatedAt = now
+		recs = append(recs, record{Job: &j})
+	}
+	return recs
 }
 
 func cloneSchedule(s Schedule) Schedule {
@@ -211,6 +268,11 @@ func (q *Queue) RunSchedules() (released []Job, err error) {
 		if l := q.lanes[cur.Lane]; l != nil && l.state.Paused {
 			continue // stopped: release nothing; resuming skips these days (SetPaused)
 		}
+		if recs := q.respaceLocked(cur, now); len(recs) > 0 {
+			if err := q.commit(recs...); err != nil {
+				return released, err
+			}
+		}
 		var due []time.Time
 		for slot := cur.nextSlot(cur.LastRun.In(now.Location())); !slot.After(now); slot = cur.nextSlot(slot) {
 			due = append(due, slot)
@@ -235,6 +297,10 @@ func (q *Queue) RunSchedules() (released []Job, err error) {
 
 		recs := []record{{Schedule: &s}}
 		gap := time.Duration(s.GapSeconds) * time.Second
+		atRun := n // spread: how many go at the run itself; the rest one per interval
+		if s.IntervalSeconds > 0 {
+			atRun = max(0, n-s.fits(now))
+		}
 		if l := q.lanes[s.Lane]; l != nil {
 			for _, id := range l.active {
 				if len(recs)-1 == n {
@@ -245,7 +311,14 @@ func (q *Queue) RunSchedules() (released []Job, err error) {
 					continue
 				}
 				j.State = Queued
-				j.RunAt = now.Add(time.Duration(len(recs)-1) * gap)
+				if i := len(recs) - 1; i < atRun {
+					j.RunAt = now.Add(time.Duration(i) * gap)
+					if s.IntervalSeconds > 0 {
+						j.RunAt = s.LastRun // at the run: never moved along by respaceLocked
+					}
+				} else {
+					j.RunAt = now.Add(time.Duration(i-atRun+1) * s.interval())
+				}
 				j.UpdatedAt = now
 				recs = append(recs, record{Job: &j})
 			}

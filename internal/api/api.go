@@ -17,7 +17,8 @@
 //	POST /v1/lanes/{lane}/clear      cancel the lane's waiting jobs {states} (default queued, held, dead) → {canceled}
 //	POST /v1/lanes/{lane}/rename     move its jobs, pause and schedule to a new name {to} → {moved}
 //	GET  /v1/schedules               schedules with their next run
-//	PUT  /v1/schedules/{lane}        set a daily release {enabled, at: "HH:MM", count, gap_seconds, max_catch_up}
+//	PUT  /v1/schedules/{lane}        set a daily release {enabled, at: "HH:MM", count, gap_seconds, max_catch_up,
+//	                                 interval_seconds (spread over the day: one per interval, the rest at the run)}
 //	POST /v1/schedules/{lane}/override   one day's count {day: "YYYY-MM-DD", count} (count < 0 clears it)
 //	GET  /v1/apps                    the apps using this laneq, with their status
 //	POST /v1/apps/{name}/heartbeat   a worker checks in {title, dashboard, start_hint, pid} → {stop}

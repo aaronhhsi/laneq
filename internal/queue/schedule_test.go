@@ -332,3 +332,152 @@ func TestMoveSwapsNeighbors(t *testing.T) {
 	}
 	q.Complete(l.Job.ID, l.Token, nil)
 }
+
+// newSpread is newNightly with the schedule spread hourly over the day.
+func newSpread(t *testing.T, held, count int) (*Queue, *clock) {
+	t.Helper()
+	q, c, _ := newNightly(t, held)
+	if _, err := q.SetSchedule(Schedule{Lane: "photos", Enabled: true, At: "00:00", Count: count, GapSeconds: 120, IntervalSeconds: 3600}); err != nil {
+		t.Fatal(err)
+	}
+	return q, c
+}
+
+func midnight(c *clock) time.Time {
+	n := c.Now()
+	return time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, taipei)
+}
+
+func TestSpreadPutsWhatDoesntFitAtTheRunAndTheRestHourly(t *testing.T) {
+	q, c := newSpread(t, 40, 30)
+	c.Add(time.Hour) // 00:00
+	got := runSchedules(t, q)
+	if len(got) != 30 {
+		t.Fatalf("released %d, want 30", len(got))
+	}
+	m := midnight(c)
+	for i, j := range got {
+		want := m // 23 hourly slots (01:00-23:00), so 7 go at midnight
+		if i >= 7 {
+			want = m.Add(time.Duration(i-6) * time.Hour)
+		}
+		if !j.RunAt.Equal(want) {
+			t.Fatalf("job %d runs at %v, want %v", i, j.RunAt, want)
+		}
+	}
+}
+
+func TestSpreadFewerThanTheHoursAreAllHourly(t *testing.T) {
+	q, c := newSpread(t, 40, 3)
+	c.Add(time.Hour)
+	got := runSchedules(t, q)
+	m := midnight(c)
+	for i, j := range got {
+		if want := m.Add(time.Duration(i+1) * time.Hour); !j.RunAt.Equal(want) {
+			t.Fatalf("job %d runs at %v, want %v", i, j.RunAt, want)
+		}
+	}
+}
+
+func TestSpreadLateJobsMoveAlongFromNow(t *testing.T) {
+	q, c := newSpread(t, 40, 5)
+	c.Add(time.Hour)
+	runSchedules(t, q)
+	m := midnight(c)
+	c.Add(3*time.Hour + 30*time.Minute) // asleep: 01:00, 02:00 and 03:00 were missed
+	runSchedules(t, q)
+	jobs := photosIn(t, q, Queued)
+	for i, j := range jobs {
+		if want := m.Add(3*time.Hour + 30*time.Minute + time.Duration(i)*time.Hour); !j.RunAt.Equal(want) {
+			t.Fatalf("job %d runs at %v, want %v", i, j.RunAt, want)
+		}
+	}
+	if len(jobs) != 5 {
+		t.Fatalf("%d queued, want 5", len(jobs))
+	}
+}
+
+func TestSpreadALittleLateIsLeftAlone(t *testing.T) {
+	q, c := newSpread(t, 40, 5)
+	c.Add(time.Hour)
+	runSchedules(t, q)
+	c.Add(time.Hour + 5*time.Minute) // the worker is just busy
+	runSchedules(t, q)
+	if j := photosIn(t, q, Queued)[0]; !j.RunAt.Equal(midnight(c).Add(time.Hour)) {
+		t.Fatalf("moved to %v while only 5 minutes late", j.RunAt)
+	}
+}
+
+func TestSpreadWhatDoesntFitWaitsForTheNextRun(t *testing.T) {
+	q, c := newSpread(t, 40, 5)
+	c.Add(time.Hour) // 00:00 on the 23rd
+	runSchedules(t, q)
+	c.Add(21*time.Hour + 30*time.Minute) // 21:30: only 21:30, 22:30 and 23:30 fit
+	runSchedules(t, q)
+	next := midnight(c).AddDate(0, 0, 1)
+	jobs := photosIn(t, q, Queued)
+	for i, want := range []time.Duration{0, time.Hour, 2 * time.Hour} {
+		if w := c.Now().Add(want); !jobs[i].RunAt.Equal(w) {
+			t.Fatalf("job %d runs at %v, want %v", i, jobs[i].RunAt, w)
+		}
+	}
+	for _, j := range jobs[3:] {
+		if !j.RunAt.Equal(next) {
+			t.Fatalf("leftover runs at %v, want the next run %v", j.RunAt, next)
+		}
+	}
+	// The next run releases the new day after them, and leaves the leftovers at the run.
+	c.Add(2*time.Hour + 30*time.Minute) // 00:00 on the 24th, nothing was claimed
+	runSchedules(t, q)
+	runSchedules(t, q)
+	jobs = photosIn(t, q, Queued)
+	if len(jobs) != 10 {
+		t.Fatalf("%d queued, want 10", len(jobs))
+	}
+	for _, j := range jobs[:5] { // yesterday's five, all due now at the run (in order)
+		if j.RunAt.After(c.Now()) {
+			t.Fatalf("yesterday's job waits until %v", j.RunAt)
+		}
+	}
+	for i, j := range jobs[5:] {
+		if want := c.Now().Add(time.Duration(i+1) * time.Hour); !j.RunAt.Equal(want) {
+			t.Fatalf("today's job %d runs at %v, want %v", i, j.RunAt, want)
+		}
+	}
+}
+
+func TestSpreadMissedRunGoesOnWaking(t *testing.T) {
+	q, c := newSpread(t, 40, 30)
+	c.Add(9 * time.Hour) // asleep through midnight; awake at 08:00
+	got := runSchedules(t, q)
+	if len(got) != 30 {
+		t.Fatalf("released %d, want 30", len(got))
+	}
+	// 15 hourly slots are left (09:00-23:00), so 15 go now, at the missed run.
+	now := 0
+	for _, j := range got {
+		if !j.RunAt.After(c.Now()) {
+			now++
+		}
+	}
+	if now != 15 {
+		t.Fatalf("%d due on waking, want 15", now)
+	}
+}
+
+func TestBadIntervalRejected(t *testing.T) {
+	q, _, _ := newNightly(t, 0)
+	for _, iv := range []int{-1, 30} {
+		if _, err := q.SetSchedule(Schedule{Lane: "photos", Enabled: true, At: "00:00", Count: 3, IntervalSeconds: iv}); err == nil {
+			t.Fatalf("interval %d accepted", iv)
+		}
+	}
+}
+
+// photosIn is the "photos" lane's jobs in the given state, in lane order.
+func photosIn(t *testing.T, q *Queue, state State) []Job {
+	t.Helper()
+	name := "photos"
+	out, _ := q.List(Filter{Lane: &name, States: []State{state}})
+	return out
+}
